@@ -1,0 +1,314 @@
+Binary files orig/__pycache__/manager.cpython-312.pyc and /tmp/q/qComfy-master/source/__pycache__/manager.cpython-312.pyc differ
+Binary files orig/__pycache__/parameters.cpython-312.pyc and /tmp/q/qComfy-master/source/__pycache__/parameters.cpython-312.pyc differ
+diff -ruN a/source/manager.py b/source/manager.py
+--- a/source/manager.py	2026-10-26 18:57:06.231651380 +0000
++++ b/source/manager.py	2026-10-26 18:57:06.261391645 +0000
+@@ -196,6 +196,11 @@
+                             if not filename:
+                                 filename = data[k][i][j]
+                             data[k][i][j] = encodeImage(QImage(data[k][i][j]))
++        for c in data.get("control", []):
++            if type(c.get("image")) == str:
++                if not filename:
++                    filename = c["image"]
++                c["image"] = encodeImage(QImage(c["image"]))
+         if filename:
+             filename = filename.rsplit(os.path.sep, 1)[-1].rsplit(".", 1)[0]
+ 
+diff -ruN a/source/parameters.py b/source/parameters.py
+--- a/source/parameters.py	2026-10-26 18:57:06.231726561 +0000
++++ b/source/parameters.py	2026-10-27 11:36:39.965851481 +0000
+@@ -346,7 +346,7 @@
+             "device", "devices", "preview_modes", "schedulers",
+             "network_modes", "model", "output_folder", 
+             "model_types", "model_modes", "clip_types",
+-            "upscalers"
++            "upscalers", "ControlNet", "ControlNets"
+         ]
+ 
+         self._adv_only = [
+@@ -357,6 +357,7 @@
+             "padding": -1, "mask_blur": 4, "mask_expand": 0,
+             "sampler": "", "samplers":[], "model":"", "models":[], "UNET":"", "UNETs":[], "CLIP":"", "CLIPs":[], "VAE":"", "VAEs":[], "LoRA":[], "LoRAs":[],
+             "upscaler": "default", "upscalers": ["default"],
++            "ControlNet": "", "ControlNets": [],
+             "device":"", "devices":[], "scheduler": "", "schedulers": [],
+             "preview_mode": "Enabled", "preview_modes": ["Disabled", "Enabled"],
+             "output_folder": "", "model_types": {},
+@@ -547,6 +548,25 @@
+         else:
+             request["type"] = "txt2img"
+ 
++        if control and request["type"] != "upscale":
++            # one entry per ControlNet input; "model" is the ControlNet file (as listed in
++            # options["ControlNet"]), the image is already preprocessed (used as-is by the server)
++            data["control"] = [
++                {
++                    "model": c[0],
++                    "image": c[2],
++                    "strength": float(c[1].get("scale", 1.0)),
++                    "start": 0.0,
++                    "end": float(c[1].get("stop", 1.0)),
++                    "guess": bool(c[1].get("guess", False)),
++                }
++                for c in control
++            ]
++
++        if any(areas) and request["type"] != "upscale":
++            # per batch item, one painted layer per subprompt (the prompt is split on AND by the server)
++            data["area"] = areas
++
+         if not request["type"] == "img2img":
+             del data["mask_blur"]
+             del data["mask_expand"]
+diff -ruN a/source/qml/components/Parameters.qml b/source/qml/components/Parameters.qml
+--- a/source/qml/components/Parameters.qml	2026-10-26 18:57:06.231934953 +0000
++++ b/source/qml/components/Parameters.qml	2026-10-27 11:36:39.967116957 +0000
+@@ -857,6 +857,115 @@
+                 }
+ 
+                 OColumn {
++                    id: cnColumn
++                    text: root.tr("ControlNet")
++                    width: parent.width
++                    isCollapsed: false
++
++                    property var controls: []
++
++                    function refresh() {
++                        var list = []
++                        var inputs = BASIC.inputs
++                        for(var i = 0; i < inputs.length; i++) {
++                            if(inputs[i].role == 4) {
++                                list.push(inputs[i])
++                            }
++                        }
++                        controls = list
++                    }
++
++                    Component.onCompleted: {
++                        refresh()
++                    }
++
++                    SText {
++                        visible: cnColumn.controls.length == 0
++                        width: parent.width
++                        height: 24
++                        text: "No ControlNet inputs"
++                        leftPadding: 6
++                        verticalAlignment: Text.AlignVCenter
++                        color: COMMON.fg2
++                        pointSize: 9.2
++
++                        Connections {
++                            target: BASIC
++                            function onInputsChanged() {
++                                cnColumn.refresh()
++                            }
++                            function onTypeUpdated() {
++                                cnColumn.refresh()
++                            }
++                        }
++                    }
++
++                    onExpanded: {
++                        paramScroll.targetPosition(cnColumn)
++                    }
++
++                    Repeater {
++                        model: cnColumn.controls
++
++                        delegate: Column {
++                            width: parent.width
++
++                            SText {
++                                width: parent.width
++                                height: 20
++                                text: modelData.controlMode == "" ? "" : GUI.modelName(modelData.controlMode)
++                                elide: Text.ElideMiddle
++                                leftPadding: 6
++                                rightPadding: 6
++                                verticalAlignment: Text.AlignVCenter
++                                color: COMMON.fg1_5
++                                pointSize: 9.8
++                            }
++
++                            OSlider {
++                                label: root.tr("Strength")
++                                width: parent.width
++                                height: 30
++
++                                bindMap: modelData.controlSettings
++                                bindKey: "strength"
++
++                                minValue: 0
++                                maxValue: 2
++                                precValue: 2
++                                incValue: 0.01
++                                snapValue: 0.05
++                            }
++
++                            OSlider {
++                                label: root.tr("Stop")
++                                width: parent.width
++                                height: 30
++
++                                bindMap: modelData.controlSettings
++                                bindKey: "stop"
++
++                                minValue: 0
++                                maxValue: 1
++                                precValue: 2
++                                incValue: 0.01
++                                snapValue: 0.05
++                            }
++
++                            OChoice {
++                                label: root.tr("Guess Mode")
++                                width: parent.width
++                                height: 30
++
++                                bindMap: modelData.controlSettings
++                                bindKeyCurrent: "guess"
++                                bindKeyModel: "bools"
++                            }
++                        }
++                    }
++                }
++
++                OColumn {
+                     id: opColumn
+                     text: root.tr("Operation")
+                     width: parent.width
+diff -ruN a/source/tabs/basic/BasicInputs.qml b/source/tabs/basic/BasicInputs.qml
+--- a/source/tabs/basic/BasicInputs.qml	2026-10-26 18:57:06.243253534 +0000
++++ b/source/tabs/basic/BasicInputs.qml	2026-10-27 11:36:39.966676481 +0000
+@@ -375,7 +375,7 @@
+ 
+                         SText {
+                             id: modeLabel
+-                            text: root.tr(modelData.controlMode)
++                            text: modelData.controlMode == "" ? "" : GUI.modelName(modelData.controlMode)
+                             visible: text != ""
+                             anchors.top: roleLabel.bottom
+                             anchors.topMargin: -1
+@@ -545,6 +545,24 @@
+                                     modelData.role = 2
+                                 }
+                             }
++                            SContextMenu {
++                                id: roleControlMenu
++                                title: root.tr("ControlNet", "Role")
++                                width: 260
++                                property var target: modelData
++                                Instantiator {
++                                    model: BASIC.parameters.values.get("ControlNets")
++                                    SContextMenuItem {
++                                        text: GUI.modelName(modelData)
++                                        onTriggered: {
++                                            roleControlMenu.target.setControl(modelData)
++                                            inputContextMenu.close()
++                                        }
++                                    }
++                                    onObjectAdded: roleControlMenu.insertItem(index, object)
++                                    onObjectRemoved: roleControlMenu.removeItem(object)
++                                }
++                            }
+                         }
+                     }
+ 
+@@ -814,6 +832,30 @@
+                                 addContextMenu.close()
+                             }
+                         }
++                        SContextMenuItem {
++                            text: root.tr("Subprompts", "Role")
++                            onPressed: {
++                                BASIC.addSubprompt()
++                                addContextMenu.close()
++                            }
++                        }
++                        SContextMenu {
++                            id: addControlMenu
++                            title: root.tr("ControlNet", "Role")
++                            width: 260
++                            Instantiator {
++                                model: BASIC.parameters.values.get("ControlNets")
++                                SContextMenuItem {
++                                    text: GUI.modelName(modelData)
++                                    onTriggered: {
++                                        BASIC.addControl(modelData)
++                                        addContextMenu.close()
++                                    }
++                                }
++                                onObjectAdded: addControlMenu.insertItem(index, object)
++                                onObjectRemoved: addControlMenu.removeItem(object)
++                            }
++                        }
+                     }
+                 }
+ 
+Binary files orig/tabs/basic/__pycache__/basic_input.cpython-312.pyc and /tmp/q/qComfy-master/source/tabs/basic/__pycache__/basic_input.cpython-312.pyc differ
+diff -ruN a/source/tabs/basic/basic_input.py b/source/tabs/basic/basic_input.py
+--- a/source/tabs/basic/basic_input.py	2026-10-26 18:57:06.243322720 +0000
++++ b/source/tabs/basic/basic_input.py	2026-10-27 00:38:49.731952550 +0000
+@@ -198,6 +198,15 @@
+         self.updateImage()
+         self.parent().updated.emit()
+ 
++    @pyqtSlot(str)
++    def setControl(self, mode):
++        # turn this input into a ControlNet input using the given model
++        self._role = InputRole.CONTROL
++        self._warning = ""
++        self._control_settings.set("mode", mode)
++        self.updateImage()
++        self.parent().updated.emit()
++
+     @pyqtProperty(QImage, notify=updated)
+     def image(self):
+         return self._image
+@@ -601,10 +610,10 @@
+                 self.clearImage()
+                 self.setImageCanvas()
+             else:
+-                preprocessors = self.basic._parameters._values.get("CN_preprocessors")
+-                preprocessor = value
+-                if not preprocessor in preprocessors:
+-                    preprocessor = "None"
++                # "mode" is the ControlNet model file; preprocessing isn't done by the
++                # ComfyUI backend, so the control image is used as-is
++                preprocessors = ["None"]
++                preprocessor = "None"
+ 
+             self._control_settings.set("preprocessors", preprocessors)
+             self._control_settings.set("preprocessor", preprocessor)
+Binary files orig/tabs/settings/__pycache__/settings.cpython-312.pyc and /tmp/q/qComfy-master/source/tabs/settings/__pycache__/settings.cpython-312.pyc differ
+diff -ruN a/source/tabs/settings/settings.py b/source/tabs/settings/settings.py
+--- a/source/tabs/settings/settings.py	2026-10-26 18:57:06.243529507 +0000
++++ b/source/tabs/settings/settings.py	2026-10-27 00:16:57.809403687 +0000
+@@ -11,10 +11,9 @@
+ 
+ class Update(QThread):
+     def run(self):
+-        git.git_reset(".", git.QDIFF_URL)
+-        inf = os.path.join("source", "sd-inference-server")
+-        if os.path.exists(inf):
+-            git.git_reset(inf, git.INFER_URL)
++        # DISABLED: this does a hard reset to upstream master, which erases local
++        # modifications (ControlNet support).
++        return
+ 
+ class Settings(QObject):
+     updated = pyqtSignal()
+@@ -147,7 +146,8 @@
+             self._gitInfo = label
+             self._needRestart = self._currentGitInfo != commit
+         elif not self._triedGitInit:
++            # DISABLED: git_init() hard-resets the folder to upstream master the first time
++            # the app runs from a ZIP (no .git folder), erasing local modifications.
+             self._triedGitInit = True
+-            git.git_init(".", git.QDIFF_URL)
+ 
+         self.updated.emit()
+\ No newline at end of file
