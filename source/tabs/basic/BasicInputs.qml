@@ -1,0 +1,887 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtGraphicalEffects 1.15
+import Qt.labs.platform 1.1
+
+import gui 1.0
+import "../../style"
+import "../../components"
+
+Item {
+    id: root
+
+    function tr(str, file = "BasicInputs.qml") {
+        return TRANSLATOR.instance.translate(str, file)
+    }
+
+    property alias scrollBar: scrollBar
+
+    ListView {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        id: inputListView
+        interactive: false
+        boundsBehavior: Flickable.StopAtBounds
+        clip:true
+        orientation: Qt.Horizontal
+        width: Math.min(contentWidth, parent.width)
+        model: BASIC.inputs
+
+        ScrollBar.horizontal: SScrollBarH { 
+            id: scrollBar
+            totalLength: inputListView.contentWidth
+            showLength: inputListView.width
+            increment: 1/(4*Math.ceil(BASIC.inputs.length))
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            z: -1
+            onWheel: {
+                scrollBar.doIncrement(wheel.angleDelta.x != 0 ? wheel.angleDelta.x : wheel.angleDelta.y)
+            }
+        }
+
+        Connections {
+            target: BASIC
+            function onOpenedUpdated() {
+                if(BASIC.openedArea == "input") {
+                    inputListView.currentIndex = BASIC.openedIndex
+                    inputListView.positionViewAtIndex(inputListView.currentIndex, ListView.Center)
+                }
+            }
+        }
+
+        delegate: Item {
+            id: item
+            height: Math.floor(inputListView.height)
+            width: height-9
+            property var input: modelData
+
+            onActiveFocusChanged: {
+                if(activeFocus) {
+                    itemFrame.forceActiveFocus()
+                }
+            }
+
+            Rectangle {
+                id: itemFrame
+                anchors.fill: parent
+                anchors.margins: 9
+                anchors.leftMargin: 0
+                color: COMMON.bg00
+                clip: false
+
+                property var highlight: activeFocus || inputContextMenu.opened || inputFileDialog.visible || centerDrop.containsDrag
+                
+                Item {
+                    anchors.fill: parent
+
+                    Rectangle {
+                        visible: modelData.linked
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: -4
+                        anchors.right: trueFrame.left
+                        height: parent.height/4
+                        color: COMMON.fg2
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: 1
+                            color: COMMON.fg3
+                        }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: COMMON.fg3
+                        }
+                    }
+
+                    Rectangle {
+                        visible: modelData.linkedTo
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.rightMargin: -5
+                        anchors.left: trueFrame.right
+                        height: parent.height/4
+                        color: COMMON.fg2
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: 1
+                            color: COMMON.fg3
+                        }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 1
+                            color: COMMON.fg3
+                        }
+                    }
+
+                    RectangularGlow {
+                        visible: trueFrame.valid
+                        anchors.fill: trueFrame
+                        glowRadius: 5
+                        opacity: 0.4
+                        spread: 0.2
+                        color: "black"
+                        cornerRadius: 10
+                    }
+
+                    TransparencyShader {
+                        visible: trueFrame.valid
+                        anchors.fill: trueFrame
+                    }
+
+                    Item {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        ImageDisplay {
+                            id: itemImage
+                            visible: !modelData.empty
+                            anchors.fill: parent
+                            image: modelData.display
+                            centered: true
+                        }
+                    }
+
+                    Rectangle {
+                        visible: modelData.folder != ""
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        border.color: COMMON.bg3
+                        border.width: 1
+                        color: "transparent"
+                        clip: true
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.leftMargin: 1
+                            anchors.rightMargin: 1
+                            color: COMMON.bg0
+                        }
+
+                        Rectangle {
+                            anchors.fill: fileList
+                            anchors.topMargin: -1
+                            anchors.bottomMargin: -1
+                            border.color: COMMON.bg3
+                            border.width: 1
+                            color: "transparent"
+                        }
+
+                        ListView {
+                            id: fileList
+                            width: parent.width-2
+                            height: Math.min(parent.height, contentHeight)
+                            anchors.centerIn: parent
+                            model: modelData.files
+                            anchors.leftMargin: 1
+                            anchors.rightMargin: 1
+                            displayMarginBeginning: 30
+                            displayMarginEnd: 30
+
+                            interactive: false
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            ScrollBar.vertical: SScrollBarV {
+                                id: fileScrollBar
+                                totalLength: fileList.contentHeight
+                                showLength: fileList.height
+                                incrementLength: 60
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.NoButton
+                                onWheel: {
+                                    fileScrollBar.doIncrement(wheel.angleDelta.y)
+                                }
+                            }
+
+                            delegate: Rectangle {
+                                color: index % 2 == 0 ? COMMON.bg1 : COMMON.bg0
+                                width: fileList.width
+                                height: 15
+
+                                property var selected: item.input.currentFile == modelData
+
+                                onSelectedChanged: {
+                                    if(selected) {
+                                        fileList.positionViewAtIndex(index, ListView.Contain)
+                                    }
+                                }
+
+                                Rectangle {
+                                    x: 40
+                                    height: 15
+                                    width: 1
+                                    color: COMMON.bg3
+                                }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    opacity: parent.selected ? 0.1 : 0.0
+                                }
+
+                                Item {
+                                    height: 15
+                                    width: 40
+                                    SText {
+                                        anchors.fill: parent
+                                        text: index
+                                        color: parent.selected ? COMMON.fg1_5 : COMMON.fg2
+                                        monospace: true
+                                        pointSize: 9.5
+                                        verticalAlignment: Text.AlignVCenter
+                                        horizontalAlignment: Text.AlignHCenter
+                                        opacity: 0.75
+                                    }
+                                }
+
+                                Item {
+                                    x: 40
+                                    height: 15
+                                    width: parent.width - 40
+                                    SText {
+                                        anchors.fill: parent
+                                        text: modelData
+                                        color: parent.selected ? COMMON.fg1_5 : COMMON.fg2
+                                        monospace: true
+                                        leftPadding: 5
+                                        rightPadding: 5
+                                        elide: Text.ElideRight
+                                        pointSize: 9.5
+                                        verticalAlignment: Text.AlignVCenter
+                                        horizontalAlignment: Text.AlignLeft
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onPressed: {
+                                        item.input.setFile(modelData)
+                                        mouse.accepted = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        id: trueFrame
+                        property var valid: itemImage.trueWidth != 0
+                        property var factor: width/itemImage.sourceWidth
+                        x: valid ? itemImage.trueX + 1: 0
+                        y: valid ? itemImage.trueY + 1: 0
+                        width: valid ? itemImage.trueWidth : parent.width
+                        height: valid ? itemImage.trueHeight : parent.height
+
+                        Rectangle {
+                            visible: itemImage.sourceWidth > 0
+                            border.color: modelData.extentWarning ? "red" : "#00ff00"
+                            border.width: 1
+                            color: "transparent"
+
+                            x: modelData.extent.x*parent.factor
+                            y: modelData.extent.y*parent.factor
+                            width: Math.floor(modelData.extent.width*parent.factor)
+                            height: Math.floor(modelData.extent.height*parent.factor)
+                        }
+
+                        Repeater {
+                            id: tiles
+                            model: modelData.tiles
+
+                            Rectangle {
+                                visible: itemImage.sourceWidth > 0
+                                border.color: Qt.hsva(index/tiles.model.length, 1.0, 1.0, 0.75)
+                                border.width: 2
+                                color: Qt.hsva(index/tiles.model.length, 1.0, 1.0, 0.1)
+
+                                x: modelData.x*parent.factor
+                                y: modelData.y*parent.factor
+                                width: Math.floor(modelData.width*parent.factor)
+                                height: Math.floor(modelData.height*parent.factor)
+                            }
+                        }
+
+
+                        Repeater {
+                            visible: modelData.role == 5
+                            model: visible ? modelData.segmentationPoints : []
+
+                            delegate: Rectangle {
+                                border.color: modelData.z <= 1 ? ["red", "#00ff00"][modelData.z] : COMMON.accent(modelData.z/5)
+                                border.width: 2
+                                color: "transparent"
+
+                                x: modelData.x*trueFrame.factor - 3
+                                y: modelData.y*trueFrame.factor - 3
+                                width: 6
+                                height: 6
+                            }
+                        }
+                    }
+
+                    Item {
+                        id: borderFrame
+                        property var valid: itemImage.trueWidth != 0
+                        x: valid ? itemImage.trueX: 0
+                        y: valid ? itemImage.trueY: 0
+                        width: valid ? itemImage.trueWidth+2 : parent.width
+                        height: valid ? itemImage.trueHeight+2 : parent.height
+                        
+
+                        Rectangle {
+                            anchors.fill: roleLabel
+                            color: "#e0101010"
+                            border.width: 1
+                            border.color: COMMON.bg3
+                        }
+
+                        SText {
+                            id: roleLabel
+                            text: root.tr(modelData.displayName, "Role")
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            leftPadding: 3
+                            topPadding: 3
+                            rightPadding: 3
+                            bottomPadding: 3
+                            color: COMMON.fg1_5
+                            pointSize: 9.8
+                        }
+
+                        Rectangle {
+                            visible: modeLabel.visible
+                            anchors.fill: modeLabel
+                            color: "#e0101010"
+                            border.width: 1
+                            border.color: COMMON.bg3
+                        }
+
+                        SText {
+                            id: modeLabel
+                            text: modelData.controlMode == "" ? "" : GUI.modelName(modelData.controlMode)
+                            visible: text != ""
+                            anchors.top: roleLabel.bottom
+                            anchors.topMargin: -1
+                            anchors.left: parent.left
+                            leftPadding: 3
+                            topPadding: 3
+                            rightPadding: 3
+                            bottomPadding: 3
+                            color: COMMON.fg1_5
+                            pointSize: 9.8
+                        }
+
+                        Rectangle {
+                            visible: sizeLabel.visible
+                            anchors.fill: sizeLabel
+                            color: "#e0101010"
+                            border.width: 1
+                            border.color: COMMON.bg3
+                        }
+
+                        SText {
+                            id: sizeLabel
+                            visible: text != ""
+                            text: modelData.size
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            height: roleLabel.height
+                            leftPadding: 3
+                            topPadding: 3
+                            rightPadding: 3
+                            bottomPadding: 3
+                            color: COMMON.fg1_5
+                            pointSize: 9.2
+                        }
+
+                        Rectangle {
+                            visible: tileLabel.visible
+                            anchors.fill: tileLabel
+                            color: "#e0101010"
+                            border.width: 1
+                            border.color: COMMON.bg3
+                        }
+
+                        SText {
+                            id: tileLabel
+                            visible: modelData.tile_size != 0
+                            text: modelData.tile_size
+                            anchors.top: sizeLabel.bottom
+                            anchors.right: parent.right
+                            anchors.topMargin: -1
+                            height: roleLabel.height
+                            leftPadding: 3
+                            topPadding: 3
+                            rightPadding: 3
+                            bottomPadding: 3
+                            color: COMMON.fg1_5
+                            pointSize: 9.2
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.fill: borderFrame
+                        border.color: itemFrame.highlight ? COMMON.fg2 : COMMON.bg4
+                        border.width: 1
+                        color: "transparent"
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                    property var startPosition: Qt.point(0,0)
+                    property var startOffset: Qt.point(0,0)
+                    property bool ready: false
+                    property var image
+                    z: -1
+                    onPressed: {
+                        startPosition = Qt.point(mouse.x, mouse.y)
+                        startOffset = Qt.point(modelData.offsetX, modelData.offsetY)
+                        if (mouse.button == Qt.LeftButton) {
+                            inputListView.currentIndex = index
+                            itemFrame.forceActiveFocus()
+                            ready = false
+                            itemFrame.grabToImage(function(result) {
+                                image = result.image;
+                                ready = true
+                            })
+                        }
+                        if (mouse.button == Qt.RightButton) {
+                            inputContextMenu.popup()
+                        }
+                    }
+
+                    onDoubleClicked: {
+                        if(!modelData.empty || modelData.currentFile != "") {
+                            BASIC.open(index, "input")
+                        }
+                    }
+
+                    onPositionChanged: {
+                        if((pressedButtons & Qt.LeftButton) && ready) {
+                            var delta = Qt.point(mouse.x-startPosition.x, mouse.y-startPosition.y)
+                            if(Math.pow(delta.x*delta.x + delta.y*delta.y, 0.5) > 5) {
+                                modelData.drag(index, image)
+                            }
+                        }
+                        if(pressedButtons & Qt.MiddleButton) {
+                            var s = 1/modelData.scale
+
+                            var px = modelData.proportionX
+                            var py = modelData.proportionY
+
+                            var dx = s*(mouse.x-startPosition.x)/(itemImage.width)
+                            var dy = s*(mouse.y-startPosition.y)/(itemImage.height)
+
+
+                            modelData.offsetX = startOffset.x - 2*px*dx
+                            modelData.offsetY = startOffset.y - 2*py*dy
+                            modelData.resetDisplay()
+                        }
+                    }
+
+                    onWheel: {
+                        if(wheel.angleDelta.y < 0) {
+                            modelData.scale -= 0.05
+                        } else {
+                            modelData.scale += 0.05
+                        }
+                        modelData.resetDisplay()
+                    }
+
+                    SContextMenu {
+                        y: 35
+                        id: inputContextMenu
+                        width: 100
+                        SContextMenuItem {
+                            visible: !modelData.empty
+                            text: root.tr("Save", "General")
+                            onPressed: {
+                                saveDialog.open()
+                            }
+                        }
+
+                        SContextMenuSeparator {
+                            visible: !modelData.empty
+                        }
+
+                        SContextMenuItem {
+                            text: root.tr("Clear", "General")
+                            onPressed: {
+                                BASIC.deleteInput(index)
+                            }
+                        }
+                        
+                        SContextMenu {
+                            width: 90
+                            title: root.tr("Set role")
+                            SContextMenuItem {
+                                text: root.tr("Image", "Role")
+                                onPressed: {
+                                    modelData.role = 1
+                                }
+                            }
+                            SContextMenuItem {
+                                text: root.tr("Mask", "Role")
+                                onPressed: {
+                                    modelData.role = 2
+                                }
+                            }
+                            SContextMenu {
+                                id: roleControlMenu
+                                title: root.tr("ControlNet", "Role")
+                                width: 260
+                                property var target: modelData
+                                Instantiator {
+                                    model: BASIC.parameters.values.get("ControlNets")
+                                    SContextMenuItem {
+                                        text: GUI.modelName(modelData)
+                                        onTriggered: {
+                                            roleControlMenu.target.setControl(modelData)
+                                            inputContextMenu.close()
+                                        }
+                                    }
+                                    onObjectAdded: roleControlMenu.insertItem(index, object)
+                                    onObjectRemoved: roleControlMenu.removeItem(object)
+                                }
+                            }
+                        }
+                    }
+
+                    FileDialog {
+                        id: saveDialog
+                        title: root.tr("Save image", "General")
+                        nameFilters: [root.tr("Image files") + " (*.png)"]
+                        fileMode: FileDialog.SaveFile
+                        defaultSuffix: "png"
+                        onAccepted: {
+                            input.saveImage(saveDialog.file)
+                        }
+                    }
+                }
+
+
+                Item {
+                    visible: modelData.warning != ""
+                    x: borderFrame.x + 1
+                    y: borderFrame.y + borderFrame.height - height
+                    height: 22
+                    width: 20
+                    clip: true
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: -1
+                        color: "#e0101010"
+                        border.color: COMMON.bg3
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        id: warningMouse
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
+
+                    SToolTip {
+                        x: -1
+                        y: -height + 1
+                        visible: warningMouse.containsMouse
+                        delay: 100
+                        text: modelData.warning
+                        pointSize: 9
+                    }
+
+                    Image {
+                        id: warningImg
+                        source: "qrc:/icons/warning.svg"
+                        width: parent.height - 7
+                        height: width
+                        sourceSize: Qt.size(parent.width, parent.height)
+                        anchors.centerIn: parent
+                        smooth: true
+                        antialiasing: true
+                    }
+
+                    ColorOverlay {
+                        id: color
+                        anchors.fill: warningImg
+                        source: warningImg
+                        color: "#ffe459"
+                    }
+                }
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 5
+
+                    SIconButton {
+                        visible: !modelData.hasSource && modelData.canLoad
+                        id: uploadButton
+                        icon: "qrc:/icons/folder.svg"
+                        onPressed: {
+                            itemFrame.forceActiveFocus()
+                            inputFileDialog.open()
+                        }
+                        border.color: COMMON.bg4
+                        border.width: 1
+                        color: COMMON.bg1
+                    }
+
+                    SIconButton {
+                        visible: !modelData.hasSource && modelData.canPaint
+                        id: paintButton
+                        icon: "qrc:/icons/paint.svg"
+                        onPressed: {
+                            itemFrame.forceActiveFocus()
+                            modelData.setImageCanvas()
+                        }
+                        border.color: COMMON.bg4
+                        border.width: 1
+                        color: COMMON.bg1
+                    }
+                }
+
+                FileDialog {
+                    id: inputFileDialog
+                    nameFilters: [root.tr("Image files") + " (*.png *.jpg *.jpeg *.webp *.gif)"]
+
+                    onAccepted: {
+                        modelData.setImageFile(inputFileDialog.file)
+                    }
+                }
+
+                FolderDialog {
+                    id: inputFolderDialog
+
+                    onAccepted: {
+                        modelData.setFolder(inputFolderDialog.folder)
+                    }
+                }
+
+                AdvancedDropArea {
+                    id: leftDrop
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: 10 + 5
+                    anchors.leftMargin: -5
+
+                    onDropped: {
+                        BASIC.addDrop(mimeData, index)
+                    }
+
+                    Rectangle {
+                        visible: leftDrop.containsDrag
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 1
+                        color: COMMON.fg2
+                    }
+                }
+
+                AdvancedDropArea {
+                    id: centerDrop
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width - 20
+
+                    onDropped: {
+                        if (modelData.canLoad) {
+                            modelData.setImageDrop(mimeData, index)
+                        }
+                    }
+                }
+
+                AdvancedDropArea {
+                    id: rightDrop
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.rightMargin: -5
+                    width: 10 + 5
+
+                    onDropped: {
+                        BASIC.addDrop(mimeData, index+1)
+                    }
+
+                    Rectangle {
+                        visible: rightDrop.containsDrag
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 1
+                        color: COMMON.fg2
+                    }
+                }
+
+                Keys.onPressed: {
+                    event.accepted = true
+                    if(event.modifiers & Qt.ControlModifier) {
+                        switch(event.key) {
+                        case Qt.Key_C:
+                            BASIC.copyItem(index, "input")
+                            break;
+                        case Qt.Key_V:
+                            BASIC.pasteItem(index, "input")
+                            break;
+                        default:
+                            event.accepted = false
+                            break;
+                        }
+                    } else {
+                        switch(event.key) {
+                        case Qt.Key_Delete:
+                            modelData.clearImage()
+                            BASIC.deleteInput(index)
+                            break;
+                        default:
+                            event.accepted = false
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        header: Item {
+            height: parent.height
+            width: 9
+        }
+
+        footer:  Item {
+            height: parent.height
+            width: height-9
+            Rectangle {
+                id: itmFooter
+                anchors.fill: parent
+                anchors.margins: 9
+                anchors.leftMargin: 0
+                color: "transparent"
+                border.width: 1
+                border.color: (itmFooter.activeFocus || addDrop.containsDrag) ? COMMON.bg6 : "transparent"
+
+                RectangularGlow {
+                    anchors.fill: addButton
+                    glowRadius: 5
+                    opacity: 0.3
+                    spread: 0.2
+                    color: "black"
+                    cornerRadius: 10
+                }
+
+                Rectangle {
+                    anchors.fill: addButton
+                    border.color: COMMON.bg4
+                    border.width: 1
+                    color: COMMON.bg1
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onPressed: {
+                        itmFooter.forceActiveFocus()
+                    }
+                }
+
+                SIconButton {
+                    id: addButton
+                    icon: "qrc:/icons/plus.svg"
+                    color: "transparent"
+                    anchors.centerIn: parent
+
+                    onPressed: {
+                        addContextMenu.open()
+                    }
+
+                    SContextMenu {
+                        y: 34
+                        id: addContextMenu
+                        width: 110
+                        clipShadow: true
+                        SContextMenuItem {
+                            text: root.tr("Image", "Role")
+                            onPressed: {
+                                BASIC.addImage()
+                                addContextMenu.close()
+                            }
+                        }
+                        SContextMenuItem {
+                            text: root.tr("Mask", "Role")
+                            onPressed: {
+                                BASIC.addMask()
+                                addContextMenu.close()
+                            }
+                        }
+                        SContextMenuItem {
+                            text: root.tr("Subprompts", "Role")
+                            onPressed: {
+                                BASIC.addSubprompt()
+                                addContextMenu.close()
+                            }
+                        }
+                        SContextMenu {
+                            id: addControlMenu
+                            title: root.tr("ControlNet", "Role")
+                            width: 260
+                            Instantiator {
+                                model: BASIC.parameters.values.get("ControlNets")
+                                SContextMenuItem {
+                                    text: GUI.modelName(modelData)
+                                    onTriggered: {
+                                        BASIC.addControl(modelData)
+                                        addContextMenu.close()
+                                    }
+                                }
+                                onObjectAdded: addControlMenu.insertItem(index, object)
+                                onObjectRemoved: addControlMenu.removeItem(object)
+                            }
+                        }
+                    }
+                }
+
+                AdvancedDropArea {
+                    id: addDrop
+                    anchors.fill: parent
+
+                    onDropped: {
+                        BASIC.addDrop(mimeData, -1)
+                    }
+                }
+
+                Keys.onPressed: {
+                    event.accepted = true
+                    if(event.modifiers & Qt.ControlModifier) {
+                        switch(event.key) {
+                        case Qt.Key_V:
+                            BASIC.pasteItem(-1, "input")
+                            break;
+                        default:
+                            event.accepted = false
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
