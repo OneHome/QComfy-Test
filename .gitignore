@@ -1,0 +1,15 @@
+source/qml/tabs
+source/qml/qml_rc.py
+source/qml/qml.rc
+*.log
+.vscode
+__pycache__
+*/__pycache__
+venv
+models
+outputs
+source/sd-inference-server
+config.json
+fav.json
+defaults.json
+python
