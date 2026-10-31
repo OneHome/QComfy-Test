@@ -622,7 +622,10 @@ class BasicInput(QObject):
                 if value == "Cosmos Reference" or "inpaint" in (value or "").lower():
                     preprocessors = ["None"]
                 else:
-                    preprocessors = ["None", "Invert", "Grayscale", "Canny", "Sketch"]
+                    preprocessors = [
+                        "None", "Invert", "Grayscale", "Canny", "Sketch",
+                        "Anyline", "Lineart", "Lineart Anime", "Softedge", "Scribble", "M-LSD", "Depth", "Pose"
+                    ]
                 preprocessor = "None"
 
             self._control_settings.set("preprocessors", preprocessors)
@@ -664,7 +667,12 @@ class BasicInput(QObject):
                     "slider_a": 0.25, "slider_a_label": "Line width",
                     "slider_b": 0.5, "slider_b_label": "Cleanup"
                 }
-            if value == "Mlsd":
+            if value == "Lineart":
+                settings = {
+                    "bool": "False", "bool_label": "Coarse",
+                    "slider_a_label": "", "slider_b_label": ""
+                }
+            if value == "M-LSD":
                 settings = {
                     "bool_label": "",
                     "slider_a": 0.1, "slider_a_label": "Score threshold",
