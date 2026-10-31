@@ -254,6 +254,10 @@ class Basic(QObject):
             if prev._role == InputRole.CONTROL and curr._role == InputRole.CONTROL:
                 curr.setLinked(prev)
                 continue
+            if curr._role == InputRole.MASK and prev.isInpaintControl and not prev._linked:
+                # no image around: the inpainting ControlNet's image is the one to inpaint
+                curr.setLinked(prev)
+                continue
             if prev._linked:
                 linked = [p for p in self._inputs if p._linked == prev._linked and p != curr]
                 if any([p.isTile for p in linked]):
@@ -772,7 +776,7 @@ class Basic(QObject):
             r = i.effectiveRole()
             if r == InputRole.IMAGE:
                 t = "Img2Img"
-            if r == InputRole.MASK and t == "Img2Img":
+            if r == InputRole.MASK and (t == "Img2Img" or (i._linked is not None and i._linked._role == InputRole.CONTROL)):
                 t = "Inpainting"
         if not t:
             t = "Txt2Img"

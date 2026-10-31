@@ -908,6 +908,8 @@ Item {
                         model: cnColumn.controls
 
                         delegate: Column {
+                            id: cnItem
+                            property var cnInput: modelData
                             width: parent.width
 
                             SText {
@@ -960,6 +962,101 @@ Item {
                                 bindMap: modelData.controlSettings
                                 bindKeyCurrent: "guess"
                                 bindKeyModel: "bools"
+                            }
+
+                            OChoice {
+                                visible: modelData.controlMode != "Cosmos Reference" && !modelData.isInpaintControl
+                                label: root.tr("Preprocessor")
+                                width: parent.width
+                                height: visible ? 30 : 0
+
+                                bindMap: modelData.controlSettings
+                                bindKeyCurrent: "preprocessor"
+                                bindKeyModel: "preprocessors"
+                            }
+
+                            OChoice {
+                                visible: label != ""
+                                width: parent.width
+                                height: visible ? 30 : 0
+
+                                bindMap: modelData.controlSettings
+                                bindKeyCurrent: "bool"
+                                bindKeyModel: "bools"
+                                bindKeyLabel: "bool_label"
+                            }
+
+                            OSlider {
+                                visible: label != ""
+                                width: parent.width
+                                height: visible ? 30 : 0
+
+                                bindMap: modelData.controlSettings
+                                bindKey: "slider_a"
+                                bindKeyLabel: "slider_a_label"
+
+                                minValue: 0
+                                maxValue: 1
+                                precValue: 2
+                                incValue: 0.01
+                                snapValue: 0.05
+                                bounded: true
+                            }
+
+                            OSlider {
+                                visible: label != ""
+                                width: parent.width
+                                height: visible ? 30 : 0
+
+                                bindMap: modelData.controlSettings
+                                bindKey: "slider_b"
+                                bindKeyLabel: "slider_b_label"
+
+                                minValue: 0
+                                maxValue: 1
+                                precValue: 2
+                                incValue: 0.01
+                                snapValue: 0.05
+                                bounded: true
+                            }
+
+                            Row {
+                                visible: modelData.controlMode != "Cosmos Reference" && !modelData.isInpaintControl
+                                width: parent.width
+                                height: visible ? 26 : 0
+                                spacing: 2
+
+                                Repeater {
+                                    model: [{"name": "Preview", "action": 0}, {"name": "Original", "action": 1}]
+                                    delegate: Rectangle {
+                                        width: (parent.width - 2) / 2
+                                        height: 26
+                                        color: COMMON.bg2
+                                        border.color: COMMON.bg4
+                                        border.width: 1
+
+                                        SText {
+                                            anchors.fill: parent
+                                            text: modelData.name
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: COMMON.fg1_5
+                                            pointSize: 9
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onPressed: {
+                                                // modelData here is the button: the input is cnItem.cnInput
+                                                if(modelData.action == 0) {
+                                                    cnItem.cnInput.annotate()
+                                                } else {
+                                                    cnItem.cnInput.resetAnnotation()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

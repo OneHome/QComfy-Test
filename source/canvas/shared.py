@@ -9,12 +9,24 @@ import PIL.Image
 class CanvasTool(Enum):
     BRUSH = 1
     ERASE = 2
+    LINE = 3
+    RECT = 4
+    ELLIPSE = 5
+    FILL = 6
+    SELECT = 7
+    MOVE = 8
 
 class CanvasOperation(Enum):
     UPDATE_STROKE = 1
     STROKE = 2
     LOAD = 3
     SAMPLE_COLOR = 4
+    UPDATE_SHAPE = 5
+    FILL = 6
+    UNDO = 7
+    CLEAR = 8
+    MOVE_UPDATE = 9
+    MOVE_COMMIT = 10
 
 class CanvasChanges():
     def __init__(self):
@@ -23,6 +35,12 @@ class CanvasChanges():
         self.tool = CanvasTool.ERASE
         self.brush = None
         self.strokes = []
+        self.shape = None
+        self.fill = None
+        self.move = None
+        self.selection = None
+        self.undo = 0
+        self.redo = 0
 
         self.operations = set()
 

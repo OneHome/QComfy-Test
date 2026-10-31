@@ -277,6 +277,12 @@ class RequestManager(QObject):
                     if data:
                         segmentation += data
 
+        # a mask linked to an inpainting ControlNet (no image input): that control image is the base image
+        for mask, target in list(links.items()):
+            if target._role == InputRole.CONTROL and target not in found:
+                if target._image and not target._image.isNull():
+                    found[target] = [encodeImage(target._image)]
+
         return found, links, controls, segmentation
     
     def buildRequests(self, parameters, inputs, append=False):
@@ -333,6 +339,8 @@ class RequestManager(QObject):
                 for j in linked:
                     data = found[j][z % len(found[j])]
                     if j._role == InputRole.IMAGE:
+                        img = data
+                    if j._role == InputRole.CONTROL and j._control_mode != "Inpaint":
                         img = data
                     if j._role == InputRole.MASK or (j._role == InputRole.CONTROL and j._control_mode == "Inpaint"):
                         msk = data

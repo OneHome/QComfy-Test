@@ -559,6 +559,8 @@ class Parameters(QObject):
                     "start": 0.0,
                     "end": float(c[1].get("stop", 1.0)),
                     "guess": bool(c[1].get("guess", False)),
+                    "preprocessor": c[1].get("annotator") or "None",
+                    "args": list(c[1].get("args", [])),
                 }
                 for c in control
             ]
@@ -608,6 +610,15 @@ class Parameters(QObject):
         request["data"] = data
 
         return request
+
+    def buildAnnotateRequest(self, mode, args, image):
+        data = {
+            "cn_image": [image],
+            "cn_annotator": [mode],
+            "cn_args": [args],
+            "device_name": self._values.get("device")
+        }
+        return {"type":"annotate", "data": data}
 
     @pyqtSlot()
     def reset(self):

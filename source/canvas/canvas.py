@@ -35,6 +35,15 @@ class CanvasBrush(QObject):
     def getAbsoluteSpacing(self):
         return self._size * self._spacing
 
+    def getDabColor(self, radius):
+        # a stroke is many overlapping dabs and their opacity builds up, which made every Hardness
+        # between 1 and 99 look alike: lower the alpha of each dab to keep the intended softness
+        color = self.getColor(radius)
+        alpha = color.alphaF()
+        if 0.0 < alpha < 1.0:
+            color.setAlphaF(1.0 - (1.0 - alpha)**max(self._spacing**0.5, 0.15))
+        return color
+
     def getColor(self, radius):
         is_max = self._hardness >= 0.99
 
@@ -209,6 +218,7 @@ class Canvas(QQuickFramebufferObject):
     sourceUpdated = pyqtSignal()
     layersUpdated = pyqtSignal()
     toolUpdated = pyqtSignal()
+    selectionUpdated = pyqtSignal()
     needsUpdated = pyqtSignal()
     colorSampled = pyqtSignal(QColor)
     changed = pyqtSignal()
@@ -219,6 +229,7 @@ class Canvas(QQuickFramebufferObject):
         self.setup()
 
         self._tool = CanvasTool.BRUSH
+        self._toolOrder = [CanvasTool.BRUSH, CanvasTool.LINE, CanvasTool.RECT, CanvasTool.ELLIPSE, CanvasTool.FILL, CanvasTool.SELECT, CanvasTool.MOVE]
         self._brush = CanvasBrush()
         self._firstSetup = True
 
@@ -237,6 +248,10 @@ class Canvas(QQuickFramebufferObject):
 
         self._toolStart = None
         self._toolActive = False
+        self._lastEnd = None
+        self._lineDrawn = False
+        self._selection = None
+        self._moveDelta = None
 
         self._needsUpdate = False
         self._setup = True
@@ -461,19 +476,96 @@ class Canvas(QQuickFramebufferObject):
         offset = QPointF(self.x(), self.y())
         return (pos - offset) / factor
 
+    @pyqtProperty(int, notify=toolUpdated)
+    def toolIndex(self):
+        return self._toolOrder.index(self._tool) if self._tool in self._toolOrder else 0
+
+    @toolIndex.setter
+    def toolIndex(self, index):
+        tool = self._toolOrder[max(0, min(index, len(self._toolOrder)-1))]
+        if tool != self._tool:
+            self._tool = tool
+            self.toolUpdated.emit()
+
+    @pyqtProperty(QRectF, notify=selectionUpdated)
+    def selection(self):
+        return QRectF(self._selection) if self._selection is not None else QRectF()
+
+    @pyqtProperty(bool, notify=selectionUpdated)
+    def hasSelection(self):
+        return self._selection is not None
+
+    def clampToSource(self, p):
+        return QPointF(min(max(p.x(), 0.0), float(self._sourceSize.width())), min(max(p.y(), 0.0), float(self._sourceSize.height())))
+
+    @pyqtSlot()
+    def undo(self):
+        self.requestUpdate()
+        self.changes.undo += 1
+        self.changes.operations.add(CanvasOperation.UNDO)
+
+    @pyqtSlot()
+    def redo(self):
+        self.requestUpdate()
+        self.changes.redo += 1
+        self.changes.operations.add(CanvasOperation.UNDO)
+
+    @pyqtSlot()
+    def clearLayer(self):
+        self.requestUpdate()
+        self.changes.operations.add(CanvasOperation.CLEAR)
+
+    def addLine(self, a, b):
+        # dabs of the brush along the segment a -> b
+        s = max(self._brush.getAbsoluteSpacing(), 1.0)
+        v = QPointF(b.x()-a.x(), b.y()-a.y())
+        m = (v.x()*v.x() + v.y()*v.y())**0.5
+        for i in range(1, int(m/s)+1):
+            f = i*s/m
+            self.changes.strokes.append(QPointF(a.x()+v.x()*f, a.y()+v.y()*f))
+        self.changes.strokes.append(QPointF(b))
+
+    def constrainShape(self, start, end, modifiers):
+        # Shift keeps rectangles square and ellipses round
+        if not (modifiers & Qt.ShiftModifier) or self._tool == CanvasTool.LINE:
+            return QPointF(end)
+        dx, dy = end.x()-start.x(), end.y()-start.y()
+        m = max(abs(dx), abs(dy))
+        return QPointF(start.x() + (m if dx >= 0 else -m), start.y() + (m if dy >= 0 else -m))
+
     @pyqtSlot(QPointF, int)
     def mousePressed(self, position, modifiers):
         self.requestUpdate()
         position = self.transformMousePosition(position)
         self._toolStart = position
         self._toolActive = True
+        self._lineDrawn = False
 
-        op = CanvasOperation.SAMPLE_COLOR if (modifiers & Qt.ControlModifier) else CanvasOperation.UPDATE_STROKE
+        if modifiers & Qt.ControlModifier:
+            # Ctrl+click samples a color, with any tool
+            self.changes.strokes.append(position)
+            self.changes.operations.add(CanvasOperation.SAMPLE_COLOR)
+            return
 
         if self._tool in {CanvasTool.BRUSH, CanvasTool.ERASE}:
-            self.changes.strokes.append(position)
+            if (modifiers & Qt.ShiftModifier) and self._lastEnd is not None:
+                # Shift+click: straight line from where the last stroke ended
+                self.addLine(self._lastEnd, position)
+                self._lineDrawn = True
+            else:
+                self.changes.strokes.append(position)
             self.lastMousePosition = position
-            self.changes.operations.add(op)
+            self.changes.operations.add(CanvasOperation.UPDATE_STROKE)
+        elif self._tool == CanvasTool.FILL:
+            self.changes.fill = position
+            self.changes.operations.add(CanvasOperation.FILL)
+        elif self._tool == CanvasTool.SELECT:
+            # a click clears the selection, dragging makes a new one
+            if self._selection is not None:
+                self._selection = None
+                self.selectionUpdated.emit()
+        elif self._tool == CanvasTool.MOVE:
+            self._moveDelta = (0, 0)
 
     @pyqtSlot(QPointF, int)
     def mouseReleased(self, position, modifiers):
@@ -482,18 +574,38 @@ class Canvas(QQuickFramebufferObject):
 
         if self._tool in {CanvasTool.BRUSH, CanvasTool.ERASE}:
             self.changes.operations.add(CanvasOperation.STROKE)
-            
-        return
+            if self.lastMousePosition is not None:
+                self._lastEnd = QPointF(self.lastMousePosition)
+        elif self._tool in {CanvasTool.LINE, CanvasTool.RECT, CanvasTool.ELLIPSE} and self._toolStart is not None:
+            end = self.constrainShape(self._toolStart, self.transformMousePosition(position), modifiers)
+            if abs(end.x()-self._toolStart.x()) + abs(end.y()-self._toolStart.y()) > 1:
+                self.changes.shape = (QPointF(self._toolStart), end)
+                self.changes.operations.add(CanvasOperation.UPDATE_SHAPE)
+                self.changes.operations.add(CanvasOperation.STROKE)
+        elif self._tool == CanvasTool.SELECT:
+            if self._selection is not None and (self._selection.width() < 2 or self._selection.height() < 2):
+                self._selection = None
+                self.selectionUpdated.emit()
+        elif self._tool == CanvasTool.MOVE and self._moveDelta is not None:
+            dx, dy = self._moveDelta
+            self.changes.operations.add(CanvasOperation.MOVE_COMMIT)
+            if self._selection is not None and (dx or dy):
+                self._selection.translate(dx, dy)
+                self.selectionUpdated.emit()
+            self._moveDelta = None
 
     @pyqtSlot(QPointF, int)
     def mouseDragged(self, position, modifiers):
         self.requestUpdate()
         position = self.transformMousePosition(position)
 
+        if self._lineDrawn:
+            return
+
         if self._tool in {CanvasTool.BRUSH, CanvasTool.ERASE}:
             if self.lastMousePosition == None:
                 self.changes.strokes.append(position)
-                self.lastMousePositions = position
+                self.lastMousePosition = position
             else:
                 last = QPointF(self.lastMousePosition)
                 s = self._brush.getAbsoluteSpacing()
@@ -510,6 +622,18 @@ class Canvas(QQuickFramebufferObject):
                 self.lastMousePosition = QPointF(p)
             
             self.changes.operations.add(CanvasOperation.UPDATE_STROKE)
+        elif self._tool in {CanvasTool.LINE, CanvasTool.RECT, CanvasTool.ELLIPSE} and self._toolStart is not None:
+            end = self.constrainShape(self._toolStart, position, modifiers)
+            self.changes.shape = (QPointF(self._toolStart), end)
+            self.changes.operations.add(CanvasOperation.UPDATE_SHAPE)
+        elif self._tool == CanvasTool.SELECT and self._toolStart is not None:
+            self._selection = QRectF(self.clampToSource(self._toolStart), self.clampToSource(position)).normalized()
+            self.selectionUpdated.emit()
+        elif self._tool == CanvasTool.MOVE and self._toolStart is not None:
+            self._moveDelta = (round(position.x()-self._toolStart.x()), round(position.y()-self._toolStart.y()))
+            self.changes.move = self._moveDelta
+            self.changes.selection = QRectF(self._selection) if self._selection is not None else None
+            self.changes.operations.add(CanvasOperation.MOVE_UPDATE)
  
     @pyqtSlot(result=QImage)
     def getImage(self):

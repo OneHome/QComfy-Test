@@ -198,6 +198,13 @@ class BasicInput(QObject):
         self.updateImage()
         self.parent().updated.emit()
 
+    @pyqtProperty(bool, notify=updated)
+    def isInpaintControl(self):
+        # controls that carry the image to edit and can take a mask by themselves: inpainting ControlNets
+        # (e.g. anima-lllite-inpainting-v2) and the Cosmos Reference
+        mode = (self._control_settings.get("mode") or "").lower()
+        return self._role == InputRole.CONTROL and ("inpaint" in mode or mode == "cosmos reference")
+
     @pyqtSlot(str)
     def setControl(self, mode):
         # turn this input into a ControlNet input using the given model
@@ -610,9 +617,12 @@ class BasicInput(QObject):
                 self.clearImage()
                 self.setImageCanvas()
             else:
-                # "mode" is the ControlNet model file; preprocessing isn't done by the
-                # ComfyUI backend, so the control image is used as-is
-                preprocessors = ["None"]
+                # "mode" is the ControlNet model file. Preprocessors run on the server (no extra models needed);
+                # they make no sense for the reference image or the inpainting controls
+                if value == "Cosmos Reference" or "inpaint" in (value or "").lower():
+                    preprocessors = ["None"]
+                else:
+                    preprocessors = ["None", "Invert", "Grayscale", "Canny", "Sketch"]
                 preprocessor = "None"
 
             self._control_settings.set("preprocessors", preprocessors)
@@ -636,10 +646,7 @@ class BasicInput(QObject):
 
             mode = self._control_settings.get("mode")
 
-            if not value in {mode, "None"}:
-                self._warning = "Non-standard preprocessor"
-            else:
-                self._warning = ""
+            self._warning = ""
             self.updated.emit()
 
             settings = {
@@ -650,6 +657,12 @@ class BasicInput(QObject):
                     "bool_label": "",
                     "slider_a": 0.4, "slider_a_label": "Lower threshold",
                     "slider_b": 0.8, "slider_b_label": "Upper threshold"
+                }
+            if value == "Sketch":
+                settings = {
+                    "bool_label": "",
+                    "slider_a": 0.25, "slider_a_label": "Line width",
+                    "slider_b": 0.5, "slider_b_label": "Cleanup"
                 }
             if value == "Mlsd":
                 settings = {

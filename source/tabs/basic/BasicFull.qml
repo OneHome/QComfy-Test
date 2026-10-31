@@ -400,6 +400,31 @@ Item {
         }
 
         Item {
+            id: selectionOverlay
+            visible: root.editing && canvas.hasSelection
+            anchors.fill: item
+
+            Rectangle {
+                property var factor: (canvas.width/canvas.sourceSize.width)
+                x: canvas.selection.x*factor
+                y: canvas.selection.y*factor
+                width: canvas.selection.width*factor
+                height: canvas.selection.height*factor
+                color: "transparent"
+                border.color: "#ffffff"
+                border.width: 1
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    color: "transparent"
+                    border.color: "#000000"
+                    border.width: 1
+                }
+            }
+        }
+
+        Item {
             visible: root.tiling
             anchors.fill: item
 
@@ -645,6 +670,130 @@ Item {
         target: BASIC.parameters
         function onSubpromptsChanged(subprompts) {
             root.syncSubprompt()
+        }
+    }
+
+    Rectangle {
+        id: canvasTools
+        visible: root.editing && !root.artifact
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 10
+        width: toolsColumn.width + 12
+        height: toolsColumn.height + 12
+        color: COMMON.bg0
+        border.color: COMMON.bg4
+        border.width: 2
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+        }
+
+        Column {
+            id: toolsColumn
+            anchors.centerIn: parent
+            spacing: 4
+
+            Row {
+                spacing: 2
+
+                Repeater {
+                    model: [
+                        {"name": "Brush", "tool": 0}, {"name": "Line", "tool": 1}, {"name": "Rect", "tool": 2},
+                        {"name": "Oval", "tool": 3}, {"name": "Fill", "tool": 4},
+                        {"name": "Select", "tool": 5}, {"name": "Move", "tool": 6}
+                    ]
+                    delegate: Rectangle {
+                        width: 56
+                        height: 26
+                        color: canvas.toolIndex === modelData.tool ? COMMON.bg5 : COMMON.bg2
+                        border.color: COMMON.bg4
+                        border.width: 1
+
+                        SText {
+                            anchors.fill: parent
+                            text: modelData.name
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            color: canvas.toolIndex === modelData.tool ? COMMON.fg0 : COMMON.fg1_5
+                            pointSize: 9
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onPressed: {
+                                canvas.toolIndex = modelData.tool
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    width: 10
+                    height: 26
+                }
+
+                Repeater {
+                    model: [{"name": "Undo", "action": 0}, {"name": "Redo", "action": 1}, {"name": "Clear", "action": 2}]
+                    delegate: Rectangle {
+                        width: 50
+                        height: 26
+                        color: COMMON.bg2
+                        border.color: COMMON.bg4
+                        border.width: 1
+
+                        SText {
+                            anchors.fill: parent
+                            text: modelData.name
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            color: COMMON.fg1_5
+                            pointSize: 9
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onPressed: {
+                                if(modelData.action == 0) {
+                                    canvas.undo()
+                                } else if(modelData.action == 1) {
+                                    canvas.redo()
+                                } else {
+                                    canvas.clearLayer()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row {
+                visible: root.painting
+                spacing: 3
+
+                Repeater {
+                    model: [
+                        Qt.rgba(1, 0, 0, 1), Qt.rgba(0, 1, 0, 1), Qt.rgba(0, 0, 1, 1), Qt.rgba(1, 1, 0, 1),
+                        Qt.rgba(1, 0, 1, 1), Qt.rgba(0, 1, 1, 1), Qt.rgba(1, 0.5, 0, 1), Qt.rgba(0.5, 0, 1, 1),
+                        Qt.rgba(1, 1, 1, 1), Qt.rgba(0.5, 0.5, 0.5, 1), Qt.rgba(0, 0, 0, 1)
+                    ]
+                    delegate: Rectangle {
+                        width: 24
+                        height: 20
+                        color: modelData
+                        border.color: COMMON.bg5
+                        border.width: 1
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onPressed: {
+                                colorPicker.setColor(modelData)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -913,6 +1062,17 @@ Item {
             case Qt.Key_Z:
                 if(root.target != null && root.segmenting) {
                     root.target.resetSegmentation()
+                } else if(root.editing) {
+                    if(event.modifiers & Qt.ShiftModifier) {
+                        canvas.redo()
+                    } else {
+                        canvas.undo()
+                    }
+                }
+                break;
+            case Qt.Key_Y:
+                if(root.editing) {
+                    canvas.redo()
                 }
                 break;
             default:
@@ -962,6 +1122,20 @@ Item {
                 break;
             case Qt.Key_Alt:
                 mouseArea.resizingBrush = true
+                break;
+            case Qt.Key_BracketLeft:
+            case Qt.Key_BracketRight:
+                if(root.editing) {
+                    var step = root.size >= 20 ? 5 : 1
+                    var newSize = Math.max(Math.min(canvas.brush.size + (event.key === Qt.Key_BracketRight ? step : -step), 500), 1)
+                    if(root.painting) {
+                        sizeSlider.value = newSize
+                    } else {
+                        rings.size = newSize
+                    }
+                } else {
+                    event.accepted = false
+                }
                 break;
             default:
                 event.accepted = false
