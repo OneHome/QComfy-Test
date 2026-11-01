@@ -904,6 +904,16 @@ Item {
                         paramScroll.targetPosition(cnColumn)
                     }
 
+                    OChoice {
+                        label: root.tr("Cosmos Reference")
+                        width: parent.width
+                        height: 30
+
+                        bindMap: root.binding.values
+                        bindKeyCurrent: "cosmos_reference"
+                        bindKeyModel: "cosmos_references"
+                    }
+
                     Repeater {
                         model: cnColumn.controls
 

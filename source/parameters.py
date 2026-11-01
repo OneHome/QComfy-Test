@@ -346,7 +346,7 @@ class Parameters(QObject):
             "device", "devices", "preview_modes", "schedulers",
             "network_modes", "model", "output_folder", 
             "model_types", "model_modes", "clip_types",
-            "upscalers", "ControlNet", "ControlNets"
+            "upscalers", "ControlNet", "ControlNets", "cosmos_references"
         ]
 
         self._adv_only = [
@@ -357,6 +357,7 @@ class Parameters(QObject):
             "padding": -1, "mask_blur": 4, "mask_expand": 0,
             "sampler": "", "samplers":[], "model":"", "models":[], "UNET":"", "UNETs":[], "CLIP":"", "CLIPs":[], "VAE":"", "VAEs":[], "LoRA":[], "LoRAs":[],
             "upscaler": "default", "upscalers": ["default"],
+            "cosmos_reference": "Off", "cosmos_references": ["Off", "On"],
             "ControlNet": "", "ControlNets": [],
             "device":"", "devices":[], "scheduler": "", "schedulers": [],
             "preview_mode": "Enabled", "preview_modes": ["Disabled", "Enabled"],
