@@ -199,6 +199,11 @@ class BasicInput(QObject):
         self.parent().updated.emit()
 
     @pyqtProperty(bool, notify=updated)
+    def isReferenceControl(self):
+        # virtual entries of the ControlNet list that are a reference image, not a model file
+        return self._role == InputRole.CONTROL and (self._control_settings.get("mode") or "") in ("Cosmos Reference", "Anima Reference (R2I)")
+
+    @pyqtProperty(bool, notify=updated)
     def isInpaintControl(self):
         # controls that carry the image to edit and can take a mask by themselves: inpainting ControlNets
         # (e.g. anima-lllite-inpainting-v2) and the Cosmos Reference
@@ -619,7 +624,7 @@ class BasicInput(QObject):
             else:
                 # "mode" is the ControlNet model file. Preprocessors run on the server (no extra models needed);
                 # they make no sense for the reference image or the inpainting controls
-                if value == "Cosmos Reference" or "inpaint" in (value or "").lower():
+                if value in ("Cosmos Reference", "Anima Reference (R2I)") or "inpaint" in (value or "").lower():
                     preprocessors = ["None"]
                 else:
                     preprocessors = [

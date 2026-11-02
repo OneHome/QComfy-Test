@@ -863,6 +863,7 @@ Item {
                     isCollapsed: false
 
                     property var controls: []
+                    property bool hasR2I: false
 
                     function refresh() {
                         var list = []
@@ -873,6 +874,13 @@ Item {
                             }
                         }
                         controls = list
+                        var r2i = false
+                        for(var j = 0; j < list.length; j++) {
+                            if(list[j].controlMode == "Anima Reference (R2I)") {
+                                r2i = true
+                            }
+                        }
+                        hasR2I = r2i
                     }
 
                     Component.onCompleted: {
@@ -912,6 +920,51 @@ Item {
                         bindMap: root.binding.values
                         bindKeyCurrent: "cosmos_reference"
                         bindKeyModel: "cosmos_references"
+                    }
+
+                    OSlider {
+                        visible: cnColumn.hasR2I
+                        label: root.tr("Ref guidance")
+                        width: parent.width
+                        height: 30
+
+                        bindMap: root.binding.values
+                        bindKey: "ref_guidance"
+
+                        minValue: 0
+                        maxValue: 20
+                        precValue: 1
+                        incValue: 0.1
+                        snapValue: 0.5
+                        bounded: true
+                    }
+
+                    OChoice {
+                        visible: cnColumn.hasR2I
+                        label: root.tr("Ref correction")
+                        width: parent.width
+                        height: 30
+
+                        bindMap: root.binding.values
+                        bindKeyCurrent: "ref_correction"
+                        bindKeyModel: "ref_corrections"
+                    }
+
+                    OSlider {
+                        visible: cnColumn.hasR2I
+                        label: root.tr("Ref size (MP)")
+                        width: parent.width
+                        height: 30
+
+                        bindMap: root.binding.values
+                        bindKey: "ref_megapixels"
+
+                        minValue: 0.25
+                        maxValue: 2
+                        precValue: 2
+                        incValue: 0.05
+                        snapValue: 0.25
+                        bounded: true
                     }
 
                     Repeater {
@@ -975,7 +1028,7 @@ Item {
                             }
 
                             OChoice {
-                                visible: modelData.controlMode != "Cosmos Reference" && !modelData.isInpaintControl
+                                visible: !modelData.isReferenceControl && !modelData.isInpaintControl
                                 label: root.tr("Preprocessor")
                                 width: parent.width
                                 height: visible ? 30 : 0
@@ -1031,7 +1084,7 @@ Item {
                             }
 
                             Row {
-                                visible: modelData.controlMode != "Cosmos Reference" && !modelData.isInpaintControl
+                                visible: !modelData.isReferenceControl && !modelData.isInpaintControl
                                 width: parent.width
                                 height: visible ? 26 : 0
                                 spacing: 2
