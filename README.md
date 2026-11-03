@@ -1,7 +1,7 @@
 ## Qt GUI for ComfyUI
 --------
 
-For the \*new\* [comfy-inference-server](https://github.com/arenasys/comfy-inference-server) backend, built on [ComfyUI](https://github.com/comfy-org/comfyui).
+For the \*new\* [comfy-inference-server](https://github.com/OneHome/comfy-inference-server) backend, built on [ComfyUI](https://github.com/comfy-org/comfyui).
 
 Things to know:
 - Primary goal is to get access to [ComfyUI](https://github.com/comfy-org/comfyui)'s extensive model support via my [qDiffusion](https://github.com/arenasys/qDiffusion) interface. 
