@@ -261,7 +261,11 @@ class RequestManager(QObject):
                     if model == "Inpaint" and i._linked:
                         k = i._linked
                     if k._image and not k._image.isNull():
-                        data += [(model, opts, encodeImage(k._image or k._original))]
+                        img = k._image or k._original
+                        if k.isFullReference and max(img.width(), img.height()) > 2048:
+                            # the server shrinks the reference to 1-2 megapixels anyway: don't upload more than needed
+                            img = img.scaled(2048, 2048, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        data += [(model, opts, encodeImage(img))]
                     if k._files:
                         for f in k._files[::-1]:
                             data += [(model, opts, k.getFilePath(f))]

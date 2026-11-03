@@ -104,7 +104,10 @@ class BasicInput(QObject):
         self._originalCropInfo = None
 
         if self._image and not self._image.isNull():
-            if self._linked and self._linked.image and not self._linked.image.isNull():
+            if self.isFullReference:
+                # the R2I reference keeps its own size and aspect ratio: it is not fitted to the generation size
+                self._image = self._original
+            elif self._linked and self._linked.image and not self._linked.image.isNull():
                 bg = self._linked.image
                 self.resizeImage(bg.size())
                 self.linkedUpdated.emit()
@@ -197,6 +200,13 @@ class BasicInput(QObject):
             self.resetSegmentation()
         self.updateImage()
         self.parent().updated.emit()
+
+    @property
+    def isFullReference(self):
+        return (
+            self._role == InputRole.CONTROL and not self._canvas
+            and self._control_settings.get("mode") == "Anima Reference (R2I)"
+        )
 
     @pyqtProperty(bool, notify=updated)
     def isReferenceControl(self):
