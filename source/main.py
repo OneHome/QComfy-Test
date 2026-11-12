@@ -21,6 +21,10 @@ import platform
 IS_WIN = platform.system() == 'Windows'
 IS_MAC = platform.system() == 'Darwin'
 
+if IS_WIN:
+    # Qt 5 may pick DirectShow, which cannot decode mp4/H.264 without extra codecs. Media Foundation is built into Windows.
+    os.environ.setdefault("QT_MULTIMEDIA_PREFERRED_PLUGINS", "windowsmediafoundation")
+
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, pyqtProperty, QObject, QUrl, QCoreApplication, Qt, QElapsedTimer, QThread
 from PyQt5.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType, qmlRegisterType
 from PyQt5.QtWidgets import QApplication
@@ -122,6 +126,80 @@ class Builder(QThread):
         buildQMLRc()
         buildQMLPy()
 
+MULTIMEDIA = "QtMultimedia"
+
+def qt_base():
+    try:
+        import PyQt5
+        return os.path.dirname(os.path.abspath(PyQt5.__file__))
+    except Exception:
+        return None
+
+MULTIMEDIA_TRIED = False
+
+def multimedia_check():
+    # Really tries `import QtMultimedia 5.15` in QML, so a broken or missing plugin is detected.
+    from PyQt5.QtQml import QQmlEngine, QQmlComponent
+    engine = QQmlEngine()
+    comp = QQmlComponent(engine)
+    comp.setData(b"import QtQuick 2.15\nimport QtMultimedia 5.15\nItem {}", QUrl())
+    ok = comp.status() == QQmlComponent.Ready
+    errors = "\n".join(e.toString() for e in comp.errors())
+    imports = "\n".join(engine.importPathList())
+    del comp
+    del engine
+    return ok, errors, imports
+
+MULTIMEDIA_MARK = "multimedia2.tried"
+
+def multimedia_missing():
+    try:
+        ok, errors, imports = multimedia_check()
+    except Exception:
+        return False
+    if ok:
+        return False
+    base = qt_base()
+    tried = MULTIMEDIA_TRIED or os.path.exists(MULTIMEDIA_MARK)
+    try:
+        with open("multimedia.log", "w", encoding="utf-8") as f:
+            f.write("QtMultimedia QML import FAILED (install already attempted: " + str(tried) + ")\n" + errors + "\n\nPyQt5 folder: " + str(base) + "\nImport paths:\n" + imports + "\n")
+            if base and os.path.isdir(os.path.join(base, "Qt5", "qml")):
+                f.write("\nQt5/qml contains: " + ", ".join(sorted(os.listdir(os.path.join(base, "Qt5", "qml")))) + "\n")
+            if base and os.path.isdir(os.path.join(base, "Qt5", "qml", "QtMultimedia")):
+                f.write("QtMultimedia folder: " + ", ".join(sorted(os.listdir(os.path.join(base, "Qt5", "qml", "QtMultimedia")))) + "\n")
+            if base and os.path.isdir(os.path.join(base, "Qt5")):
+                found = []
+                for root, dirs, files in os.walk(os.path.join(base, "Qt5")):
+                    for name in files:
+                        if "multimedia" in name.lower() or "mediaservice" in root.lower():
+                            found.append(os.path.relpath(os.path.join(root, name), base))
+                f.write("\nMultimedia files present:\n" + "\n".join(sorted(found)) + "\n")
+    except Exception:
+        pass
+    # only offered once (delete multimedia2.tried to retry); with a system Qt (no PyQt5/Qt5 folder) pip cannot fix it
+    if tried:
+        return False
+    return bool(base) and os.path.isdir(os.path.join(base, "Qt5"))
+
+def extract_multimedia(wheel_dir):
+    # qml/QtMultimedia needs Qt5MultimediaQuick_p, which the PyQt5-Qt5 wheel does not ship but PySide2 (same Qt 5.15.2) does.
+    # Only this one library is copied, next to Qt5Multimedia, so nothing already loaded is overwritten.
+    import zipfile
+    libdir = os.path.join(qt_base(), "Qt5", "bin" if IS_WIN else "lib")
+    os.makedirs(libdir, exist_ok=True)
+    count = 0
+    for wheel in glob.glob(os.path.join(wheel_dir, "*.whl")):
+        with zipfile.ZipFile(wheel) as z:
+            for info in z.infolist():
+                name = os.path.basename(info.filename.replace("\\", "/")).lower()
+                if not info.is_dir() and (name.startswith("qt5multimediaquick") or name.startswith("libqt5multimediaquick")):
+                    with z.open(info) as src, open(os.path.join(libdir, os.path.basename(info.filename)), "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    count += 1
+    if count == 0:
+        raise RuntimeError("Qt5MultimediaQuick was not found in the downloaded package")
+
 def check(dependancies, enforce_version=True):
     importlib.reload(pkg_resources)
     needed = []
@@ -157,6 +235,11 @@ class Installer(QThread):
             self.installing.emit(p)
             args = ["pip", "install", "-U", p]
             pkg = p.split("=",1)[0]
+            tmp_dir = None
+            if p == MULTIMEDIA:
+                import tempfile
+                tmp_dir = tempfile.mkdtemp()
+                args = ["pip", "download", "PySide2==5.15.2.1", "--no-deps", "--only-binary=:all:", "-d", tmp_dir]
             if pkg in {"torch", "torchvision"}:
                 args = ["pip", "install", "-U", p, "--index-url", "https://download.pytorch.org/whl/" + p.rsplit("+",1)[-1]]
             args += ["--progress-bar", "off" if pkg == "pip" else "raw"]
@@ -190,7 +273,18 @@ class Installer(QThread):
             if self.stopping:
                 return
             if self.proc.returncode:
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
                 raise RuntimeError("Failed to install: ", p, "\n", output)
+            if tmp_dir:
+                try:
+                    global MULTIMEDIA_TRIED
+                    MULTIMEDIA_TRIED = True
+                    with open(MULTIMEDIA_MARK, "w") as mark:
+                        mark.write("install attempted")
+                    extract_multimedia(tmp_dir)
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
             
             self.installed.emit(p)
         self.proc = None
@@ -261,6 +355,8 @@ class Coordinator(QObject):
 
     def find_needed(self):
         self.required_need = check(self.required, self.enforce)
+        if multimedia_missing():
+            self.required_need += [MULTIMEDIA]
         self.optional_need = check(self.optional, self.enforce)
     
     @pyqtProperty(list, constant=True)

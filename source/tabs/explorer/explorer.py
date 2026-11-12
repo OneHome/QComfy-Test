@@ -133,25 +133,25 @@ class Populater(QObject):
         o = self.gui._options
         tp = self.gui._options.get("model_types", {})\
 
-        for idx, name in enumerate(o["UNET"]):
+        for idx, name in enumerate(o.get("UNET", [])):
             self.setModel(name, "checkpoint", "", "checkpoint", idx)
-        self.finishCategory("checkpoint", len(o["UNET"]))
+        self.finishCategory("checkpoint", len(o.get("UNET", [])))
 
-        for idx, name in enumerate(o["UNET"]):
+        for idx, name in enumerate(o.get("UNET", [])):
             self.setModel(name, "unet", "", "unet", idx)
-        self.finishCategory("unet", len(o["UNET"]))
+        self.finishCategory("unet", len(o.get("UNET", [])))
 
-        for idx, name in enumerate(o["CLIP"]):
+        for idx, name in enumerate(o.get("CLIP", [])):
             self.setModel(name, "clip", "", "clip", idx)
-        self.finishCategory("CLIP", len(o["CLIP"]))
+        self.finishCategory("CLIP", len(o.get("CLIP", [])))
 
-        for idx, name in enumerate(o["VAE"]):
+        for idx, name in enumerate(o.get("VAE", [])):
             self.setModel(name, "vae", "", "vae", idx)
-        self.finishCategory("vae", len(o["VAE"]))
+        self.finishCategory("vae", len(o.get("VAE", [])))
 
-        for idx, name in enumerate(o["LoRA"]):
+        for idx, name in enumerate(o.get("LoRA", [])):
             self.setModel(name, "lora", "", "lora", idx)
-        self.finishCategory("lora", len(o["LoRA"]))
+        self.finishCategory("lora", len(o.get("LoRA", [])))
 
         for idx, name in enumerate(o.get("upscaler", [])):
             self.setModel(name, "upscaler", "", "upscaler", idx)
@@ -175,15 +175,15 @@ class Populater(QObject):
             if type(o[k]) == list:
                 o[k] = [a for a in o[k] if a in f]
 
-        for name in o["UNET"]:
+        for name in o.get("UNET", []):
             self.setModel(name, "favourite", "Checkpoint", "checkpoint", idx, False)
             idx += 1
 
-        for name in o["VAE"]:
+        for name in o.get("VAE", []):
             self.setModel(name, "favourite", "VAE", "component", idx, False)
             idx += 1
 
-        for name in o["LoRA"]:
+        for name in o.get("LoRA", []):
             self.setModel(name, "favourite", "LoRA", "lora", idx, False)
             idx += 1
 

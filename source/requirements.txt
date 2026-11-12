@@ -7,3 +7,4 @@ PyQt5==5.15.7
 cryptography==40.0.2
 numpy==1.24.3
 pygit2==1.12.1
+av>=10.0.0

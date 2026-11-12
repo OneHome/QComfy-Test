@@ -741,7 +741,7 @@ class GUI(QObject):
     
     @pyqtSlot(str, result=str)
     def netType(self, name):
-        model_types = self._options["model_types"]
+        model_types = self._options.get("model_types", {})
         return model_types.get(name, "Unknown")
     
     @pyqtSlot(str)

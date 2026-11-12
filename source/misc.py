@@ -1066,7 +1066,7 @@ class SuggestionManager(QObject):
         if self._sources["Model"] and "UNET" in self.gui._options:
             models = []
             for n in self.gui._options["UNET"]:
-                if n in self.gui._options["VAE"] and n in self.gui._options["CLIP"]:
+                if n in self.gui._options.get("VAE", []) and n in self.gui._options.get("CLIP", []):
                     models += [n]
             self._models += [(self.gui.modelName(n), "Model") for n in models]
         

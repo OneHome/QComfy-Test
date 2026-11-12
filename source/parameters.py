@@ -470,8 +470,8 @@ class Parameters(QObject):
                     else:
                         self._values.set(k, self.gui._options[k][0])
         models = []
-        for k in self.gui._options["UNET"]:
-            if k in self.gui._options["CLIP"] and k in self.gui._options["VAE"]:
+        for k in self.gui._options.get("UNET", []):
+            if k in self.gui._options.get("CLIP", []) and k in self.gui._options.get("VAE", []):
                 models += [k]
         self._values.set("models", models)
 

@@ -21,10 +21,16 @@ TextInput {
     font.pointSize: pointSize * COORDINATOR.scale
     color: COMMON.fg0
     selectByMouse: true
+    persistentSelection: true
 
     Component.onCompleted: {
         if(font.bold) {
             font.letterSpacing = -1.0
         }
+    }
+
+    SInputMenu {
+        anchors.fill: parent
+        target: parent
     }
 }
