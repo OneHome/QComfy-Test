@@ -121,6 +121,7 @@ Item {
                 anchors.top: parent.top
                 height: 30
                 label: root.tr("Address")
+                plain: true
                 disabled: !hostEnabled.hosting
 
                 value: GUI.config.get("host_address")
@@ -161,6 +162,7 @@ Item {
                 anchors.top: parent.top
                 height: 30
                 label: root.tr("Password")
+                plain: true
                 value: ""
                 placeholder: root.tr("Random")
                 disabled: !hostEnabled.hosting

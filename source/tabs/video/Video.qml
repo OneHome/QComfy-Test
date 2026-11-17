@@ -183,6 +183,7 @@ Item {
                 placeholder: root.tr("Scene / action")
                 text: VIDEO.values.get("prompt")
                 bindKey: "prompt"
+                enhanceable: true
                 onEdited: VIDEO.values.set("prompt", text)
             }
 
@@ -198,6 +199,7 @@ Item {
                     placeholder: root.tr("Spoken line (optional)")
                     text: VIDEO.values.get("dialogue")
                     bindKey: "dialogue"
+                    enhanceable: true
                     onEdited: VIDEO.values.set("dialogue", text)
                 }
                 PromptBox {
@@ -206,6 +208,7 @@ Item {
                     placeholder: root.tr("Sound effects / ambience (optional)")
                     text: VIDEO.values.get("sound")
                     bindKey: "sound"
+                    enhanceable: true
                     onEdited: VIDEO.values.set("sound", text)
                 }
                 PromptBox {
@@ -214,6 +217,7 @@ Item {
                     placeholder: root.tr("Music (optional)")
                     text: VIDEO.values.get("music")
                     bindKey: "music"
+                    enhanceable: true
                     onEdited: VIDEO.values.set("music", text)
                 }
             }
@@ -266,6 +270,111 @@ Item {
             Column {
                 id: sections
                 width: flick.width - 8
+
+                // ---- References (servers in Ref2VA mode)
+                OColumn {
+                    visible: VIDEO.referencesEnabled
+                    text: root.tr("References")
+                    width: parent.width
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        topPadding: 4
+                        bottomPadding: 4
+
+                        Item {
+                            id: refArea
+                            width: parent.width
+                            height: refFlow.height
+
+                            Flow {
+                                id: refFlow
+                                width: parent.width
+                                spacing: 4
+                                Repeater {
+                                    model: VIDEO.references
+                                    ReferenceSlot {
+                                        index: model.index
+                                        path: modelData.path
+                                        name: modelData.name
+                                        label: modelData.label
+                                        count: VIDEO.references.length
+                                    }
+                                }
+                                Rectangle {
+                                    visible: VIDEO.references.length < VIDEO.maxReferences
+                                    width: 84
+                                    height: 84
+                                    color: COMMON.bg00
+                                    border.color: addDrop.containsDrag ? COMMON.fg2 : COMMON.bg4
+                                    SText {
+                                        anchors.centerIn: parent
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: "+\n" + root.tr("Add images")
+                                        color: addMouse.containsMouse ? COMMON.fg2 : COMMON.bg7
+                                        pointSize: 9.5
+                                    }
+                                    MouseArea {
+                                        id: addMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onPressed: refDialog.open()
+                                    }
+                                    AdvancedDropArea {
+                                        id: addDrop
+                                        anchors.fill: parent
+                                        onDropped: {
+                                            var files = VIDEO.pathsDrop(mimeData)
+                                            if(files.length > 0) {
+                                                VIDEO.addReferences(files)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // dropping on the pictures works too
+                            AdvancedDropArea {
+                                anchors.fill: parent
+                                z: -1
+                                onDropped: {
+                                    var files = VIDEO.pathsDrop(mimeData)
+                                    if(files.length > 0) {
+                                        VIDEO.addReferences(files)
+                                    }
+                                }
+                            }
+                        }
+
+                        OSlider {
+                            width: parent.width
+                            label: root.tr("Reference size")
+                            bindMap: VIDEO.values
+                            bindKey: "ref_size"
+                            minValue: VIDEO.refSizeMin
+                            maxValue: VIDEO.refSizeMax
+                            precValue: 0
+                            incValue: 5
+                        }
+
+                        SText {
+                            width: parent.width - 8
+                            x: 4
+                            wrapMode: Text.Wrap
+                            text: root.tr("Lower size = faster and less memory. The first reference is the character who says the Spoken line. The <Picture N> tags are written for you.")
+                            color: COMMON.fg3
+                            pointSize: 8.8
+                        }
+
+                        SButton {
+                            visible: VIDEO.references.length > 0
+                            width: parent.width
+                            height: 24
+                            label: root.tr("Remove all references")
+                            onPressed: VIDEO.clearReferences()
+                        }
+                    }
+                }
 
                 // ---- Start / end frame
                 OColumn {
@@ -329,6 +438,7 @@ Item {
                             bindKeyModel: "resolutions"
                         }
                         OChoice {
+                            visible: VIDEO.serverUpscale
                             width: parent.width; height: 30
                             label: root.tr("Output")
                             bindMap: VIDEO.values
@@ -336,6 +446,7 @@ Item {
                             bindKeyModel: "outputs"
                         }
                         OChoice {
+                            visible: VIDEO.serverUpscale
                             width: parent.width; height: 30
                             label: root.tr("Upscale")
                             bindMap: VIDEO.values
@@ -343,7 +454,7 @@ Item {
                             bindKeyModel: "presets"
                         }
                         SText {
-                            visible: !VIDEO.upscaleAvailable
+                            visible: VIDEO.serverUpscale && !VIDEO.upscaleAvailable
                             width: parent.width
                             height: visible ? 22 : 0
                             leftPadding: 4
@@ -370,6 +481,7 @@ Item {
                             bounded: false
                         }
                         OSlider {
+                            visible: VIDEO.serverUpscale
                             width: parent.width
                             label: root.tr("Upscale seed")
                             bindMap: VIDEO.values
@@ -379,6 +491,77 @@ Item {
                             precValue: 0
                             incValue: 1
                             bounded: false
+                        }
+                    }
+                }
+
+                // ---- Prompt templates
+                OColumn {
+                    text: root.tr("Prompt templates")
+                    width: parent.width
+                    isCollapsed: true
+                    Column {
+                        width: parent.width
+                        spacing: 2
+                        topPadding: 4
+                        bottomPadding: 4
+                        Repeater {
+                            model: VIDEO.templates
+                            Column {
+                                id: templateGroup
+                                property var group: modelData
+                                property bool open: false
+                                width: parent.width
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 24
+                                    color: headerMouse.containsMouse ? COMMON.bg3 : COMMON.bg2
+
+                                    SText {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: templateGroup.group.name + "  (" + templateGroup.group.items.length + ")"
+                                              + (templateGroup.group.field == "prompt" ? "" : "  \u2192 " + templateGroup.group.field + " box")
+                                        color: templateGroup.open ? COMMON.fg1 : COMMON.fg2
+                                        pointSize: 9.2
+                                    }
+
+                                    SText {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: templateGroup.open ? "\u2212" : "+"
+                                        color: COMMON.fg2
+                                        pointSize: 11
+                                    }
+
+                                    MouseArea {
+                                        id: headerMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onPressed: templateGroup.open = !templateGroup.open
+                                    }
+                                }
+
+                                Flow {
+                                    visible: templateGroup.open
+                                    x: 6
+                                    width: parent.width - 12
+                                    spacing: 3
+                                    topPadding: 5
+                                    bottomPadding: 6
+                                    Repeater {
+                                        model: templateGroup.group.items
+                                        TemplateChip {
+                                            label: modelData.label
+                                            phrase: modelData.text
+                                            field: templateGroup.group.field
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -467,8 +650,8 @@ Item {
                             label: root.tr("Strength 1")
                             bindMap: VIDEO.values
                             bindKey: "strength1"
-                            minValue: 0
-                            maxValue: 1.5
+                            minValue: -10
+                            maxValue: 10
                             precValue: 2
                             incValue: 0.05
                         }
@@ -484,8 +667,8 @@ Item {
                             label: root.tr("Strength 2")
                             bindMap: VIDEO.values
                             bindKey: "strength2"
-                            minValue: 0
-                            maxValue: 1.5
+                            minValue: -10
+                            maxValue: 10
                             precValue: 2
                             incValue: 0.05
                         }
@@ -599,6 +782,20 @@ Item {
                     onPressed: deleteDialog.close()
                 }
             }
+        }
+    }
+
+    // picture chooser of the References section (it cannot live inside the OColumn: that one only takes visual items)
+    FileDialog {
+        id: refDialog
+        fileMode: FileDialog.OpenFiles
+        nameFilters: [root.tr("Images") + " (*.png *.jpg *.jpeg *.webp *.bmp)"]
+        onAccepted: {
+            var chosen = []
+            for(var i = 0; i < refDialog.files.length; i++) {
+                chosen.push(refDialog.files[i].toString())
+            }
+            VIDEO.addReferences(chosen)
         }
     }
 

@@ -24,6 +24,7 @@ from PyQt5.QtGui import QImage, QDesktopServices, QGuiApplication
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon
 
 import parameters
+from tabs.video import enhancer
 from misc import MimeData, encodeImage
 
 try:
@@ -46,6 +47,8 @@ DEFAULT_RESOLUTION = "384p (default)"
 PREVIEW_ONLY = "384p preview only"
 NO_LORA = "None"
 
+VIDEO_INSTANCE = None
+
 # shown until the server sends its own tables (they are replaced by the "options" reply)
 FALLBACK = {
     "aspects": ["16:9 Landscape", "9:16 Portrait", "1:1 Square", "4:3 Classic", "3:4 Portrait", "21:9 Cinema",
@@ -65,7 +68,7 @@ DEFAULTS = {
     "lora1": NO_LORA, "strength1": 1.0, "lora2": NO_LORA, "strength2": 1.0,
     "sampler": "euler", "samplers": ["euler", "res_multistep"], "shift": 12.0, "steps": 0, "anchor": True,
     "resolution": DEFAULT_RESOLUTION, "resolutions": [DEFAULT_RESOLUTION],
-    "start_frame": "", "end_frame": "", "notify": True, "title": "",
+    "start_frame": "", "end_frame": "", "notify": True, "title": "", "ref_size": 70,
     **{f"mylora_s{i}": 1.0 for i in range(MAX_MY_LORAS)},
     "aspects": FALLBACK["aspects"], "outputs": [PREVIEW_ONLY] + FALLBACK["outputs"],
     "presets": FALLBACK["presets"], "languages": FALLBACK["languages"], "loras": [NO_LORA],
@@ -77,6 +80,20 @@ def label_seconds(label, frames=None):
         return float(str(label).split()[0])
     except Exception:
         return (frames or 0) / FPS
+
+
+DEFAULT_REF_NAMES = ("the main subject", "the subject")   # the labels the server uses for a reference without a name
+
+
+def clean_ref_name(name):
+    """A name for <Subject N>: one short line, no commas (the server splits the names on commas)."""
+    return " ".join(str(name or "").replace(",", " ").split())[:60]
+
+
+def ref_names_for_request(names):
+    """One name per reference, in order. A blank one gets the generic label, so the position of the other names
+    (<Subject N> follows the order of the references) cannot shift."""
+    return [clean_ref_name(n) or DEFAULT_REF_NAMES[0 if i == 0 else 1] for i, n in enumerate(names)]
 
 
 def nearest_duration(seconds, durations):
@@ -197,6 +214,167 @@ def format_meta(item):
     return "\n".join(lines)
 
 
+TEMPLATES_FILE = "video_templates.json"
+TEMPLATE_FIELDS = ("prompt", "dialogue", "sound", "music")
+
+LEGACY_DEFAULTS = [
+    {"name": "Camera", "field": "prompt", "items": [
+        "static shot", "slow push-in", "slow pull-out", "tracking shot", "handheld camera", "pan left", "pan right",
+        "orbit around the subject", "low angle", "aerial view", "close-up", "wide shot"]},
+    {"name": "Lighting", "field": "prompt", "items": [
+        "golden hour light", "soft diffused light", "dramatic side lighting", "neon lighting", "moody low-key lighting",
+        "natural daylight", "backlit silhouette", "candlelight"]},
+    {"name": "Style", "field": "prompt", "items": [
+        "cinematic", "photorealistic", "35mm film look", "shallow depth of field", "documentary style", "anime style",
+        "claymation", "vintage VHS look"]},
+    {"name": "Motion", "field": "prompt", "items": [
+        "slow motion", "smooth motion", "dynamic action", "subtle motion", "gentle breeze moving hair and clothes", "time-lapse"]},
+    {"name": "Sound effects", "field": "sound", "items": [
+        "gentle wind", "city traffic", "rain on a window", "footsteps", "crowd murmur", "birds chirping", "ocean waves", "quiet room tone"]},
+    {"name": "Music", "field": "music", "items": [
+        "soft ambient piano", "tense orchestral strings", "upbeat electronic", "lo-fi beat", "epic cinematic drums", "melancholic guitar"]},
+]
+
+
+
+DEFAULT_TEMPLATES = [
+    {"name": "Shot size / framing", "field": "prompt", "items": [
+        "extreme close-up", "close-up", "medium close-up", "medium shot", "cowboy shot", "full body shot", "wide shot",
+        "extreme wide establishing shot", "over-the-shoulder shot", "two-shot", "point-of-view shot", "eye-level",
+        "low angle", "high angle", "bird's-eye view", "worm's-eye view", "dutch angle", "centered symmetrical composition",
+        "rule of thirds composition", "foreground framing"]},
+    {"name": "Camera movement", "field": "prompt", "items": [
+        "static locked-off shot", "slow push-in", "slow pull-out", "dolly in", "dolly out", "tracking shot", "side tracking shot",
+        "handheld camera", "steadicam follow shot", "pan left", "pan right", "tilt up", "tilt down", "crane up", "crane down",
+        "orbit around the subject", "slow zoom in", "slow zoom out", "drone flyover", "aerial view descending", "whip pan",
+        "rack focus", "smooth gimbal movement"]},
+    {"name": "Lens / focus", "field": "prompt", "items": [
+        "shallow depth of field", "deep focus", "creamy bokeh background", "85mm portrait lens", "35mm lens", "24mm wide-angle lens",
+        "telephoto lens compression", "macro lens", "anamorphic lens", "fisheye lens", "tilt-shift lens", "soft focus",
+        "sharp focus on the subject", "lens flare"]},
+    {"name": "Lighting", "field": "prompt", "items": [
+        "golden hour light", "blue hour light", "soft diffused light", "natural daylight", "hard sunlight with long shadows",
+        "overcast soft light", "dramatic side lighting", "rim light", "backlit silhouette", "volumetric light rays",
+        "light through window blinds", "neon lighting", "moody low-key lighting", "bright high-key lighting", "chiaroscuro lighting",
+        "candlelight", "firelight glow", "moonlight", "practical lights in the scene", "studio three-point lighting",
+        "harsh fluorescent light", "warm lamp light"]},
+    {"name": "Time / weather", "field": "prompt", "items": [
+        "dawn", "sunrise", "midday sun", "late afternoon", "sunset", "twilight", "night", "clear sky", "overcast sky",
+        "light rain", "heavy rain", "wet streets reflecting lights", "fog", "morning mist", "snowfall", "thunderstorm",
+        "windy day", "dust in the air", "falling autumn leaves"]},
+    {"name": "Environment", "field": "prompt", "items": [
+        "busy city street at night", "quiet forest at dawn", "foggy mountain valley", "sunlit kitchen", "rainy neon alley",
+        "empty desert road", "cozy cabin interior", "beach at sunset", "futuristic laboratory", "old library", "modern apartment",
+        "crowded market", "rooftop overlooking the city", "snowy landscape", "tropical jungle", "underground subway station",
+        "small caf\u00e9", "open countryside", "spaceship interior", "abandoned building"]},
+    {"name": "Style", "field": "prompt", "items": [
+        "cinematic", "photorealistic", "hyperrealistic", "35mm film look", "16mm film grain", "documentary style",
+        "professional cinematography", "film noir black and white", "vintage 1970s film", "retro 80s look", "vintage VHS look",
+        "cyberpunk", "anime style", "hand-drawn 2D animation", "3D animation", "stop-motion", "claymation", "low-poly 3D",
+        "watercolor painting", "oil painting", "comic book style", "surreal dreamlike", "found footage"]},
+    {"name": "Color / grading", "field": "prompt", "items": [
+        "natural colors", "warm color grade", "cool color grade", "teal and orange color grade", "desaturated muted tones",
+        "vibrant saturated colors", "pastel color palette", "monochrome", "high contrast", "soft film colors", "rich deep blacks",
+        "earthy tones", "neon color palette", "golden warm tones"]},
+    {"name": "Mood", "field": "prompt", "items": [
+        "calm and peaceful", "tense and suspenseful", "melancholic", "joyful and warm", "mysterious", "epic and grand", "intimate",
+        "eerie", "nostalgic", "energetic", "dreamy", "romantic", "lonely", "hopeful", "dramatic", "playful", "serene"]},
+    {"name": "Subject / character", "field": "prompt", "items": [
+        "natural skin texture", "expressive face", "detailed eyes", "natural blinking", "subtle facial expressions",
+        "realistic hands", "detailed clothing fabric", "natural hair strands", "lifelike body language", "consistent appearance",
+        "natural proportions", "detailed textures"]},
+    {"name": "Action", "field": "prompt", "items": [
+        "walks toward the camera", "walks away from the camera", "turns and looks at the camera", "looks away thoughtfully",
+        "smiles softly", "laughs", "talks to the camera", "talks with another person", "runs", "dances", "sits quietly",
+        "takes a deep breath", "picks up an object", "opens a door", "looks out of a window", "reaches toward the camera",
+        "nods slowly", "sips a drink"]},
+    {"name": "Motion", "field": "prompt", "items": [
+        "slow motion", "smooth motion", "fluid natural movement", "dynamic action", "fast-paced motion", "subtle motion",
+        "time-lapse", "hyperlapse", "gentle breeze moving hair and clothes", "fabric fluttering in the wind", "hair flowing",
+        "leaves swaying", "water rippling", "smoke drifting", "dust particles floating", "rain falling", "steam rising",
+        "realistic physics", "stable consistent motion", "natural pacing"]},
+    {"name": "Quality / details", "field": "prompt", "items": [
+        "highly detailed", "sharp focus", "crisp textures", "high resolution", "clean image", "coherent details",
+        "stable background", "consistent lighting", "natural look", "professional quality", "realistic reflections",
+        "fine details"]},
+    {"name": "Sound effects", "field": "sound", "items": [
+        "gentle wind", "wind through the trees", "city traffic", "distant traffic", "rain on a window", "rain on a roof",
+        "distant thunder", "footsteps", "footsteps on gravel", "echoing footsteps", "crowd murmur", "crowd chatter", "birds chirping",
+        "ocean waves", "crackling fire", "door creaking", "clock ticking", "keyboard typing", "cutlery clinking",
+        "car engine", "machinery hum", "heartbeat", "forest ambience", "quiet room tone"]},
+    {"name": "Music", "field": "music", "items": [
+        "soft ambient piano", "minimal piano", "classical piano", "tense orchestral strings", "emotional string quartet",
+        "slow cello solo", "uplifting orchestral", "epic cinematic drums", "heroic brass fanfare", "dark ambient drone",
+        "dreamy synth pad", "80s synthwave", "upbeat electronic", "lo-fi beat", "deep bass pulse", "trap beat",
+        "melancholic guitar", "gentle acoustic guitar", "jazz trio with soft brushes", "playful pizzicato strings",
+        "ethereal choir", "tribal percussion", "funky bass groove", "music box lullaby", "no music"]},
+]
+
+
+def normalize_templates(data):
+    """Accepts [{"name", "field", "items": ["text", {"label", "text"}]}] and returns the clean version (or raises)."""
+    groups = []
+    for g in data:
+        field = g.get("field", "prompt")
+        if field not in TEMPLATE_FIELDS:
+            field = "prompt"
+        items = []
+        for it in g.get("items", []):
+            if isinstance(it, str):
+                it = {"label": it, "text": it}
+            text = " ".join(str(it.get("text") or it.get("label") or "").split())
+            if text:
+                items.append({"label": str(it.get("label") or text), "text": text})
+        if items:
+            groups.append({"name": str(g.get("name") or ""), "field": field, "items": items})
+    if not groups:
+        raise ValueError("no templates")
+    return groups
+
+
+def load_templates():
+    """Reads video_templates.json (created with the defaults the first time, so you can edit it). Returns (templates, note)."""
+    defaults = normalize_templates(DEFAULT_TEMPLATES)
+    if not os.path.isfile(TEMPLATES_FILE):
+        try:
+            with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
+                json.dump(DEFAULT_TEMPLATES, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+        return defaults, ""
+    try:
+        with open(TEMPLATES_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        if data == LEGACY_DEFAULTS:
+            # still the first, short list (never edited): upgrade it to the current one
+            try:
+                with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
+                    json.dump(DEFAULT_TEMPLATES, f, ensure_ascii=False, indent=2)
+            except OSError:
+                pass
+            return defaults, ""
+        return normalize_templates(data), ""
+    except Exception as ex:
+        return defaults, f"{TEMPLATES_FILE} could not be read ({ex}); using the built-in templates."
+
+
+PRESETS_FILE = "video_enhancer_presets.json"
+# preset field -> key of GUI.config
+PRESET_KEYS = {"provider": "enhancer_provider", "url": "enhancer_url", "model": "enhancer_model", "key": "enhancer_key",
+               "instructions": "enhancer_instructions", "send_images": "enhancer_send_images", "style": "enhancer_style"}
+
+
+def load_presets():
+    """Enhancer presets (provider, key, model, ...) from video_enhancer_presets.json -> (list, name of the last one used)."""
+    try:
+        with open(PRESETS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        presets = [p for p in data.get("presets", []) if isinstance(p, dict) and str(p.get("name") or "").strip()]
+        return presets, str(data.get("current") or "")
+    except Exception:
+        return [], ""
+
+
 def make_poster(path, out):
     """First frame of an mp4 as a small jpg (needs the 'av' package; without it the gallery just shows the play icon)."""
     import av
@@ -215,7 +393,13 @@ class Video(QObject):
     libraryUpdated = pyqtSignal()
     selectionUpdated = pyqtSignal()
     postersUpdated = pyqtSignal()
+    referencesUpdated = pyqtSignal()
     deleted = pyqtSignal()
+    enhanceUpdated = pyqtSignal()
+    _enhanced = pyqtSignal(str, str, str, str)
+    _enhancerTested = pyqtSignal(str)
+    _enhancerNote = pyqtSignal(str)
+    enhancePresetsUpdated = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -230,12 +414,19 @@ class Video(QObject):
         self._durations = dict(FALLBACK["durations"])
         self._preview_only = PREVIEW_ONLY
         self._log = []
+        self._templates, note = load_templates()
+        if note:
+            self._addLog(note)
         self._lastFile = ""
         self._requestId = None
         self._stage = None          # "preview" | "upscale" while a job runs
         self._previewName = None
         self._chunks = {}
         self._frameImages = {}
+        self._refs = []             # reference images of a Ref2VA server: [{"path", "image" (QImage), "name"}], in <Picture N> order
+        self._refCfg = {"enabled": False, "max": 0, "min": 50, "top": 200, "default": 70}
+        self._serverUpscale = True  # False on a Ref2VA server: previews only
+        self._serverMode = "fl2va"
         self._upscale = False
         self._default_resolution = DEFAULT_RESOLUTION
         self._uploads = {}
@@ -255,10 +446,20 @@ class Video(QObject):
         self._selected = ""
 
         qmlRegisterSingletonType(Video, "gui", 1, 0, "VIDEO", lambda qml, js: self)
+        global VIDEO_INSTANCE
+        VIDEO_INSTANCE = self
         self.gui.response.connect(self.onResponse)
 
         # gui.windowActive is never updated by anything else, so it always said "active": follow the real state
         self._trackWindowState()
+
+        self._presets, self._presetCurrent = load_presets()
+        self._enhancing = set()
+        self._undo = {}
+        self._enhancerStatus = ""
+        self._enhanced.connect(self._onEnhanced)
+        self._enhancerTested.connect(self._onEnhancerTested)
+        self._enhancerNote.connect(self._addLog)
 
         self._posterTried = set()
         self._posterBusy = False
@@ -381,7 +582,9 @@ class Video(QObject):
             kind = clip_kind(name, meta)
             when = datetime.datetime.fromtimestamp(st.st_mtime)
             prompt = " ".join(str(meta.get("prompt") or "").split())
+            refs_n = int(meta.get("references") or 0)
             sub = " \u00b7 ".join(x for x in (when.strftime("%d %b %H:%M"), f"{seconds:g} s" if seconds else "", dims,
+                                              f"{refs_n} ref" if refs_n else "",
                                               {"final": "upscaled", "preview": "preview"}.get(kind, "")) if x)
             tip = []
             if custom:
@@ -396,6 +599,7 @@ class Video(QObject):
                      str(meta.get("aspect") or ""), str(meta.get("resolution") or ""), dims, str(meta.get("language") or ""),
                      kind, str(meta.get("sampler") or "")]
             words += [str(meta.get(k) or "") for k in ("dialogue", "sound", "music")]
+            words += [str(n) for n in (meta.get("ref_names") or [])]
             items.append({
                 "path": path, "name": name, "meta": meta, "mtime": st.st_mtime, "size": st.st_size, "kind": kind,
                 "custom_title": custom,
@@ -577,6 +781,274 @@ class Video(QObject):
             self.refreshLibrary()
             self.deleted.emit()
 
+    @pyqtProperty('QVariantList', constant=True)
+    def templates(self):
+        return self._templates
+
+    @pyqtSlot(str, str)
+    def applyTemplate(self, field, phrase):
+        """Adds the phrase to the end of that box, or takes it out again if it is already there."""
+        phrase = " ".join(phrase.split())
+        if field not in TEMPLATE_FIELDS or not phrase:
+            return
+        current = self._values.get(field)
+        current = current if isinstance(current, str) else ""
+        if phrase.lower() in current.lower():
+            def gone(m):
+                return ", " if (m.group(1) and m.group(2)) else ""
+            new = re.sub(r"(,\s*)?" + re.escape(phrase) + r"(\s*,\s*)?", gone, current, count=1, flags=re.IGNORECASE)
+            new = new.strip(" ,\n")
+        else:
+            base = current.rstrip()
+            if not base:
+                new = phrase
+            elif base[-1] in ".!?":
+                new = base + " " + phrase
+            else:
+                new = base.rstrip(",;") + ", " + phrase
+        self._values.set(field, new)
+
+    # ---- prompt enhancer (language model API, set up in Settings > Enhancer)
+    def _text(self, key):
+        v = self._values.get(key)
+        return v if isinstance(v, str) else ""
+
+    def _enhancerSettings(self):
+        def cfg(key):
+            v = self.gui.config.get(key)
+            return v if isinstance(v, str) else ""
+        return {"provider": cfg("enhancer_provider") or "OpenAI", "url": cfg("enhancer_url"),
+                "model": cfg("enhancer_model"), "key": cfg("enhancer_key")}
+
+    def _enhancerExtra(self):
+        v = self.gui.config.get("enhancer_instructions")
+        return v if isinstance(v, str) else ""
+
+    def _enhancerStyle(self):
+        style = self.gui.config.get("enhancer_style")
+        return style if style in enhancer.STYLES else enhancer.STANDARD_STYLE
+
+    @pyqtProperty('QStringList', constant=True)
+    def enhancerStyles(self):
+        return enhancer.STYLES
+
+    @pyqtProperty('QStringList', notify=enhanceUpdated)
+    def enhancingFields(self):
+        return sorted(self._enhancing)
+
+    @pyqtProperty('QStringList', notify=enhanceUpdated)
+    def undoFields(self):
+        return sorted(self._undo)
+
+    @pyqtProperty(str, notify=enhanceUpdated)
+    def enhancerStatus(self):
+        return self._enhancerStatus
+
+    def _enhancerImages(self, frames):
+        """The start / end frames as base64 JPEGs, unless the user turned that off in Settings > Enhancer."""
+        images = []
+        if (frames["start"] or frames["end"] or frames["refs"]) and self.gui.config.get("enhancer_send_images") is not False:
+            pictures = [self._frameImages.get(key) for key in ("start_frame", "end_frame")]
+            pictures += [r["image"] for r in self._refs] if self._usingReferences() else []
+            for img in pictures:
+                data = self._frameJpeg(img)
+                if data:
+                    images.append(("image/jpeg", data))
+        return images
+
+    @pyqtSlot(str)
+    def enhance(self, field):
+        """Rewrites one prompt box with the language model. The previous text is kept for Undo.
+        With the H3 Rewriter style every box asks for the same thing: one complete H3 prompt, written into Scene / action."""
+        if field not in enhancer.FIELD_LABELS:
+            return
+        style = self._enhancerStyle()
+        if style == enhancer.H3_STYLE:
+            field = "prompt"
+        if field in self._enhancing:
+            return
+        values = {k: self._text(k) for k in enhancer.FIELD_LABELS}
+        text = values[field]
+        using = self._usingReferences()
+        frames = {"start": self._hasFrame("start_frame"), "end": self._hasFrame("end_frame"),
+                  "refs": len(self._refs) if using else 0,
+                  "ref_names": ref_names_for_request([r["name"] for r in self._refs]) if using else []}
+        if style == enhancer.H3_STYLE:
+            if not text.strip() and not (frames["start"] or frames["end"] or frames["refs"]):
+                self._addLog("Write the idea in Scene / action first (or set a start / end frame or a reference image), then press Enhance.")
+                return
+        elif not text.strip() and (field == "prompt" or not values["prompt"].strip()):
+            self._addLog("Write something in the box first, then press Enhance.")
+            return
+        settings = self._enhancerSettings()
+        extra = self._enhancerExtra()
+        images = self._enhancerImages(frames)
+        # effective length: the closest clip length the server offers (frames / 24 fps), the same one the options panel shows
+        clip = self._durations[nearest_duration(self._values.get("seconds", 5.0), self._durations)] / FPS
+        language = self._text("language") or "English"
+        aspect = str(self._values.get("aspect") or "")
+        self._enhancing.add(field)
+        self.enhanceUpdated.emit()
+
+        def work():
+            notes = []
+            try:
+                if style == enhancer.H3_STYLE:
+                    result = enhancer.enhance_h3(settings, values, frames, images, clip, language, extra, notes, aspect=aspect)
+                else:
+                    result = enhancer.enhance(settings, field, text, values, extra, images, frames, notes)
+                error = ""
+            except enhancer.EnhancerError as ex:
+                result, error = "", str(ex)
+            except Exception as ex:
+                result, error = "", f"Unexpected error: {ex}"
+            for note in notes:
+                self._enhancerNote.emit(note)
+            self._enhanced.emit(field, text, result, error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _frameJpeg(self, img):
+        """A start / end frame as a base64 JPEG (longest side 1024 px) to attach to the request, or None."""
+        if img is None or img.isNull():
+            return None
+        import base64
+        from PyQt5.QtCore import QBuffer, QByteArray, QIODevice
+        img = img.convertToFormat(QImage.Format_RGB32)
+        if max(img.width(), img.height()) > 1024:
+            img = img.scaled(1024, 1024, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        data = QByteArray()
+        buf = QBuffer(data)
+        buf.open(QIODevice.WriteOnly)
+        if not img.save(buf, "JPEG", 85):
+            return None
+        return base64.b64encode(bytes(data.data())).decode("ascii")
+
+    def _onEnhanced(self, field, original, result, error):
+        self._enhancing.discard(field)
+        label = enhancer.FIELD_LABELS[field]
+        if error:
+            self._addLog(f"Could not enhance {label}: {error}")
+        elif self._text(field).strip() != original.strip():
+            self._addLog(f"{label} was changed while it was being enhanced, so the result was not applied.")
+        else:
+            self._undo[field] = original
+            self._values.set(field, result)
+            if self._enhancerStyle() == enhancer.H3_STYLE:
+                self._addLog("Complete Duckyshell H3 prompt written into Scene / action. While it is there the server uses it as it is and ignores "
+                             "the Spoken line, Sound and Music boxes (what they said is already inside it). "
+                             "Right click > Undo enhance (or Ctrl+Shift+E) brings the old Scene text back.")
+            else:
+                self._addLog(f"{label} enhanced. Right click the box > Undo enhance (or Ctrl+Shift+E) brings the old text back.")
+        self.enhanceUpdated.emit()
+
+    @pyqtSlot(str)
+    def undoEnhance(self, field):
+        if field in self._undo:
+            self._values.set(field, self._undo.pop(field))
+            self.enhanceUpdated.emit()
+
+    @pyqtSlot()
+    def testEnhancer(self):
+        """Settings > Enhancer: sends a tiny request to check the provider, key and model."""
+        self._enhancerStatus = "Testing..."
+        self.enhanceUpdated.emit()
+        settings = self._enhancerSettings()
+        style = self._enhancerStyle()
+
+        def work():
+            try:
+                if style == enhancer.H3_STYLE:
+                    result = enhancer.enhance_h3(settings, {"prompt": "a cat on a sofa"}, {}, [], 5.17)
+                else:
+                    result = enhancer.enhance(settings, "prompt", "a cat on a sofa")
+                self._enhancerTested.emit("Working. Example: " + result[:90])
+            except enhancer.EnhancerError as ex:
+                self._enhancerTested.emit("Failed: " + str(ex))
+            except Exception as ex:
+                self._enhancerTested.emit("Failed: " + str(ex))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _onEnhancerTested(self, status):
+        self._enhancerStatus = status
+        self.enhanceUpdated.emit()
+
+    # ---- enhancer presets
+    def _savePresets(self):
+        try:
+            with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+                json.dump({"presets": self._presets, "current": self._presetCurrent}, f, ensure_ascii=False, indent=2)
+        except OSError as ex:
+            self._addLog(f"Could not save the enhancer presets: {ex}")
+
+    def _presetStatus(self, text):
+        self._enhancerStatus = text
+        self.enhancePresetsUpdated.emit()
+        self.enhanceUpdated.emit()
+
+    def _findPreset(self, name):
+        name = name.strip().lower()
+        return next((p for p in self._presets if p["name"].lower() == name), None)
+
+    @pyqtProperty('QStringList', notify=enhancePresetsUpdated)
+    def enhancerPresetEntries(self):
+        return ["Current settings"] + [p["name"] for p in self._presets]
+
+    @pyqtProperty(str, notify=enhancePresetsUpdated)
+    def enhancerPreset(self):
+        return self._presetCurrent if self._findPreset(self._presetCurrent) else "Current settings"
+
+    @pyqtSlot(str)
+    def applyPreset(self, name):
+        preset = self._findPreset(name)
+        if not preset:
+            return
+        for field, key in PRESET_KEYS.items():
+            value = preset.get(field)
+            self.gui.config.set(key, bool(value) if field == "send_images" else (value if isinstance(value, str) else ""))
+        self.gui.config.set("enhancer_preset_name", preset["name"])
+        self._presetCurrent = preset["name"]
+        self._savePresets()
+        self._presetStatus(f'Preset "{preset["name"]}" loaded.')
+
+    @pyqtSlot()
+    def savePreset(self):
+        """Saves the current Enhancer settings under the name in the Preset name box (same name = overwrite)."""
+        name = " ".join(str(self.gui.config.get("enhancer_preset_name") or "").split())[:40]
+        if not name:
+            self._presetStatus("Write a name for the preset first.")
+            return
+        preset = {"name": name}
+        for field, key in PRESET_KEYS.items():
+            value = self.gui.config.get(key)
+            preset[field] = (value is not False) if field == "send_images" else (value if isinstance(value, str) else "")
+        old = self._findPreset(name)
+        if old:
+            self._presets[self._presets.index(old)] = preset
+        else:
+            self._presets.append(preset)
+        self._presetCurrent = name
+        self._savePresets()
+        self._presetStatus(f'Preset "{name}" saved.')
+
+    @pyqtSlot()
+    def deletePreset(self):
+        name = str(self.gui.config.get("enhancer_preset_name") or "")
+        preset = self._findPreset(name)
+        if not preset:
+            self._presetStatus("There is no preset with that name.")
+            return
+        self._presets.remove(preset)
+        if self._presetCurrent.lower() == preset["name"].lower():
+            self._presetCurrent = ""
+        self._savePresets()
+        self._presetStatus(f'Preset "{preset["name"]}" deleted.')
+
+    @pyqtProperty('QStringList', constant=True)
+    def enhancerProviders(self):
+        return enhancer.PROVIDER_NAMES
+
     @pyqtSlot()
     def reusePrompts(self):
         """Loads only the prompts of the selected clip into the text boxes (not the other settings)."""
@@ -612,6 +1084,12 @@ class Video(QObject):
         if meta.get("shift") is not None:
             v.set("shift", float(meta["shift"]))
         v.set("steps", int(meta.get("steps") or 0))
+        if meta.get("ref_size") is not None:
+            v.set("ref_size", max(self._refCfg["min"], min(self._refCfg["top"], int(meta["ref_size"]))))
+        for i, name in enumerate(meta.get("ref_names") or []):      # names go to the reference images already in the form
+            if i < len(self._refs):
+                self._refs[i]["name"] = name
+        self.referencesUpdated.emit()
         # LoRAs: the catalog ones go to LoRA 1/2, the rest to the list (uploaded files only if still on the server)
         catalog = [x for x in meta.get("loras", []) if x.get("source") == "catalog"][:2]
         for i in (1, 2):
@@ -641,14 +1119,16 @@ class Video(QObject):
             v.set("anchor", bool(up.get("anchor", True)))
         else:
             v.set("output", self._preview_only)
-        note = " Start/end images and uploaded LoRAs that are no longer on the server were not restored." \
-            if (meta.get("start_frame") or meta.get("end_frame") or skipped) else ""
+        note = " Start/end and reference images, and uploaded LoRAs that are no longer on the server, were not restored (reference names went to the images already in the form)." \
+            if (meta.get("start_frame") or meta.get("end_frame") or meta.get("references") or skipped) else ""
         self._addLog("Settings of the selected video loaded into the form." + note)
         self.updated.emit()
 
     # ------------------------------------------------------------ helpers
     def _ratio(self):
         img = self._frameImages.get("start_frame") or self._frameImages.get("end_frame")
+        if (img is None or img.isNull()) and self._usingReferences():
+            img = self._refs[0]["image"]
         if img is not None and not img.isNull() and img.height() > 0:
             return img.width() / img.height()
         return None
@@ -698,6 +1178,22 @@ class Video(QObject):
         self._keep("lora2", "loras", no_lora)
         self._keep("resolution", "resolutions", self._default_resolution)
         self._keep("sampler", "samplers", o.get("default_sampler") or "euler")
+        # what the server can do: reference images (Ref2VA mode) and the 2K upscale (FL2VA mode)
+        refs = o.get("references") or {}
+        size = refs.get("size") or {}
+        self._refCfg = {"enabled": bool(refs.get("enabled")), "max": 9 if refs.get("enabled") else 0,
+                        "min": int(size.get("min") or 50), "top": int(size.get("max") or 200),
+                        "default": int(size.get("default") or 70)}
+        self._serverUpscale = o.get("upscale", True) is not False
+        self._serverMode = str(o.get("mode") or "fl2va")
+        if not self._serverUpscale:
+            v.set("output", self._preview_only)     # nothing to upscale with: the options panel shows the preview estimate
+        cfg = self._refCfg
+        current = v.get("ref_size")
+        v.set("ref_size", max(cfg["min"], min(cfg["top"], int(current) if isinstance(current, (int, float)) else cfg["default"])))
+        # QComfy UI supports up to nine Ref2VA identity references.
+        # The connected workflow/server still needs to accept the submitted reference count.
+        self.referencesUpdated.emit()
         self.updated.emit()
 
     # ------------------------------------------------------------ frames
@@ -712,7 +1208,117 @@ class Video(QObject):
             return
         self._frameImages[key] = img
         self._values.set(key, path)
+        self.referencesUpdated.emit()      # reference pictures are numbered after the start / end frames
         self.updated.emit()
+
+    # ------------------------------------------------------------ reference images (Ref2VA servers)
+    def _hasFrame(self, key):
+        img = self._frameImages.get(key)
+        return img is not None and not img.isNull()
+
+    def _usingReferences(self):
+        return self._refCfg["enabled"] and bool(self._refs)
+
+    @pyqtProperty(bool, notify=updated)
+    def referencesEnabled(self):
+        return self._refCfg["enabled"]
+
+    @pyqtProperty(int, notify=updated)
+    def maxReferences(self):
+        return self._refCfg["max"]
+
+    @pyqtProperty(int, notify=updated)
+    def refSizeMin(self):
+        return self._refCfg["min"]
+
+    @pyqtProperty(int, notify=updated)
+    def refSizeMax(self):
+        return self._refCfg["top"]
+
+    @pyqtProperty(bool, notify=updated)
+    def serverUpscale(self):
+        """False when the server only makes previews (Ref2VA mode)."""
+        return self._serverUpscale
+
+    @pyqtProperty(str, notify=updated)
+    def serverMode(self):
+        return self._serverMode
+
+    @pyqtProperty('QVariantList', notify=referencesUpdated)
+    def references(self):
+        offset = int(self._hasFrame("start_frame")) + int(self._hasFrame("end_frame"))
+        return [{"path": r["path"], "name": r["name"], "label": f"Picture {offset + i + 1}"}
+                for i, r in enumerate(self._refs)]
+
+    @pyqtSlot(str, str)
+    def addStudioReference(self, path, name):
+        """Add one H3 Studio image to Ref2VA references and retain its identity label."""
+        path = str(path or "")
+        if not path:
+            return
+        local = QUrl(path).toLocalFile() if path.startswith("file:") else path
+        before = len(self._refs)
+        self.addReferences([local])
+        # addReferences ignores duplicates and images beyond the server/UI limit.
+        for index, ref in enumerate(self._refs):
+            if ref.get("path") == local:
+                if name and (index >= before or not ref.get("name")):
+                    ref["name"] = str(name).strip()
+                self.referencesUpdated.emit()
+                self.updated.emit()
+                return
+
+    @pyqtSlot('QVariantList')
+    def addReferences(self, paths):
+        limit = 9 if self._refCfg["enabled"] else 0
+        added = False
+        for path in paths:
+            path = str(path)
+            local = QUrl(path).toLocalFile() if path.startswith("file:") else path
+            if len(self._refs) >= limit:
+                self._addLog(f"QComfy supports up to {limit} reference images: the rest were ignored.")
+                break
+            if any(r["path"] == local for r in self._refs):
+                continue
+            img = QImage(local)
+            if img.isNull():
+                self._addLog(f"Could not read image: {local}")
+                continue
+            self._refs.append({"path": local, "image": img, "name": ""})
+            added = True
+        if added:
+            self.referencesUpdated.emit()
+            self.updated.emit()
+
+    @pyqtSlot(int)
+    def removeReference(self, index):
+        if 0 <= index < len(self._refs):
+            del self._refs[index]
+            self.referencesUpdated.emit()
+            self.updated.emit()
+
+    @pyqtSlot(int, int)
+    def moveReference(self, index, delta):
+        other = index + delta
+        if 0 <= index < len(self._refs) and 0 <= other < len(self._refs):
+            self._refs[index], self._refs[other] = self._refs[other], self._refs[index]
+            self.referencesUpdated.emit()
+
+    @pyqtSlot(int, str)
+    def setReferenceName(self, index, name):
+        if 0 <= index < len(self._refs):
+            self._refs[index]["name"] = name      # no signal: the text field keeps what is being typed
+
+    @pyqtSlot()
+    def clearReferences(self):
+        if self._refs:
+            self._refs.clear()
+            self.referencesUpdated.emit()
+            self.updated.emit()
+
+    @pyqtSlot(MimeData, result='QVariantList')
+    def pathsDrop(self, mimeData):
+        return [url.toLocalFile() for url in mimeData.mimeData.urls() if url.isLocalFile()]
 
     @pyqtSlot(MimeData, result=str)
     def pathDrop(self, mimeData):
@@ -746,6 +1352,10 @@ class Video(QObject):
             img = self._frameImages.get(key)
             if img is not None and not img.isNull():
                 data[field] = encodeImage(img)
+        if self._usingReferences():
+            data["refs"] = [encodeImage(r["image"]) for r in self._refs]
+            data["ref_names"] = ref_names_for_request([r["name"] for r in self._refs])
+            data["ref_size"] = int(v.get("ref_size"))
         return {"type": REQ_GENERATE, "data": data}
 
     def buildUpscaleRequest(self, name):
@@ -765,6 +1375,10 @@ class Video(QObject):
         job["frames"] = self._durations.get(req.get("duration"))
         job["start_frame"] = "start_img" in req
         job["end_frame"] = "end_img" in req
+        if "refs" in req:
+            job["references"] = len(req["refs"])
+            job["ref_names"] = req["ref_names"]
+            job["ref_size"] = req["ref_size"]
         job["loras"] = []
         for name, key in ((req.get("lora1"), "strength1"), (req.get("lora2"), "strength2")):
             if name and name != NO_LORA:
@@ -777,15 +1391,15 @@ class Video(QObject):
     @pyqtSlot()
     def generate(self):
         v = self._values
-        if not str(v.get("prompt")).strip() and not (self._frameImages.get("start_frame") or
-                                                    self._frameImages.get("end_frame")):
-            self._addLog("Write a scene / action prompt or give a start frame first.")
+        if not str(v.get("prompt")).strip() and not (self._hasFrame("start_frame") or self._hasFrame("end_frame")
+                                                    or self._usingReferences()):
+            self._addLog("Write a scene / action prompt, give a start frame or add a reference image first.")
             return
         self._stage = "preview"
         self._previewName = None
         self._chunks = {}
         self._started = time.time()
-        wants_upscale = v.get("output") != self._preview_only
+        wants_upscale = v.get("output") != self._preview_only and self._serverUpscale
         self._upscale = wants_upscale and v.get("resolution") == self._default_resolution
         if wants_upscale and not self._upscale:
             self._addLog(f"Upscale only works from the {self._default_resolution} preview: "

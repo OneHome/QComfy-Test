@@ -9,10 +9,14 @@ Rectangle {
     id: box
     property alias text: area.text
     property string placeholder: ""
+    property bool enhanceable: false      // Enhance / Undo live in the right click menu and on Ctrl+E / Ctrl+Shift+E (uses bindKey as the field)
+    property bool enhancing: enhanceable && VIDEO.enhancingFields.indexOf(bindKey) >= 0
+    property bool canUndo: enhanceable && VIDEO.undoFields.indexOf(bindKey) >= 0
     property string bindKey: ""      // key of VIDEO.values this box shows: changes made elsewhere (Use prompts / Use settings) show up here
     signal edited()
 
     color: COMMON.bg00
+
 
     Connections {
         target: VIDEO.values
@@ -50,12 +54,42 @@ Rectangle {
             persistentSelection: true
             font.pointSize: 10.5
             background: null
-            SInputMenu { anchors.fill: parent; target: parent }
+            readOnly: box.enhancing
+            opacity: box.enhancing ? 0.55 : 1.0
+            SInputMenu { anchors.fill: parent; target: parent; enhanceKey: box.enhanceable ? box.bindKey : "" }
             onTextChanged: {
                 if(activeFocus) {
                     box.edited()
                 }
             }
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+E"
+        enabled: box.enhanceable && area.activeFocus && !box.enhancing
+        onActivated: VIDEO.enhance(box.bindKey)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+E"
+        enabled: box.enhanceable && area.activeFocus && box.canUndo
+        onActivated: VIDEO.undoEnhance(box.bindKey)
+    }
+
+    // while the language model works: a thin pulsing line on the bottom border (takes no space)
+    Rectangle {
+        visible: box.enhancing
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 2
+        color: "#cc2f00"
+        SequentialAnimation on opacity {
+            running: box.enhancing
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.25; to: 1.0; duration: 600 }
+            NumberAnimation { from: 1.0; to: 0.25; duration: 600 }
         }
     }
 }

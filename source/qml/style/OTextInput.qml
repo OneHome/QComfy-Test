@@ -10,6 +10,8 @@ Item {
     property var tooltip: ""
     property var value: ""
     property var placeholder: ""
+    property bool password: false
+    property bool plain: false        // ordinary text: a click only places the cursor and an empty value is allowed
     property var override: ""
     property var defaultValue: null
     property var mini: height == 20
@@ -123,9 +125,10 @@ Item {
                 monospace: true
                 validator: control.validator
                 readOnly: control.disabled
+                echoMode: control.password ? TextInput.Password : TextInput.Normal
                 
                 onEditingFinished: {
-                    if(text == "") {
+                    if(text == "" && !control.plain) {
                         control.value = defaultValue
                         text = defaultValue
                     } else {
@@ -147,7 +150,9 @@ Item {
                         if(valueText.text == control.defaultValue && control.defaultValue == "-1") {
                             valueText.text = ""
                         }
-                        valueText.selectAll()
+                        if(!control.plain) {
+                            valueText.selectAll()
+                        }
                     }
                 }
 

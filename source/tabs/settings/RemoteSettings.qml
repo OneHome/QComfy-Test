@@ -40,6 +40,7 @@ Item {
 
                 bindMap: GUI.config
                 bindKey: "endpoint"
+                plain: true
             }
 
             SIconButton {
@@ -72,6 +73,7 @@ Item {
             placeholder: root.tr("None")
             bindMap: GUI.config
             bindKey: "password"
+            plain: true
         }
 
         SButton {
@@ -155,6 +157,7 @@ Item {
                 anchors.fill: parent
                 id: hfKeyInput
                 label: "Huggingface API Key"
+                plain: true
                 placeholder: "None"
                 Component.onCompleted: {
                     var token = GUI.config.get("hf_token")
@@ -174,6 +177,7 @@ Item {
                 anchors.fill: parent
                 id: civitaiKeyInput
                 label: "Civitai API Key"
+                plain: true
                 placeholder: "None"
                 Component.onCompleted: {
                     var token = GUI.config.get("civitai_token")

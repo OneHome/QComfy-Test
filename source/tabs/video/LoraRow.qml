@@ -34,8 +34,8 @@ Item {
         bindMap: VIDEO.values
         bindKey: "mylora_s" + row.index
         defaultValue: 1
-        minValue: 0
-        maxValue: 2
+        minValue: -10
+        maxValue: 10
         precValue: 2
         incValue: 0.05
     }

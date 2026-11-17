@@ -110,8 +110,12 @@ class GUI(QObject):
             "swap": False, "advanced": False, "autocomplete": 1, "vocab": [], "enforce_versions": True,
             "host_enabled": False, "host_address": "127.0.0.1", "host_port": 28888, "host_tunnel": False,
             "host_read_only": True, "host_monitor": False, "tabs": [], "grid_save_all": False,
-            "scaling": False
+            "scaling": False, "enhancer_provider": "OpenAI", "enhancer_url": "", "enhancer_model": "", "enhancer_key": "",
+            "enhancer_instructions": "", "enhancer_send_images": True, "enhancer_preset_name": "", "enhancer_style": "Duckyshell H3 Writer"
         })
+        # Migrate profiles created before the unified Duckyshell H3 Writer was added.
+        if self._config._values.get("enhancer_style") != "Duckyshell H3 Writer":
+            self._config._values.set("enhancer_style", "Duckyshell H3 Writer")
         self._config.updated.connect(self.onConfigUpdated)
         self._remoteStatus = RemoteStatusMode.INACTIVE
         self._remoteLatency = 0
@@ -170,6 +174,9 @@ class GUI(QObject):
             for t in self.tabs:
                 if not getattr(t, "hidden", False):
                     shown += [t.name]
+        elif any(t.name == "H3 Studio" for t in self.tabs) and "H3 Studio" not in shown:
+            # Surface the newly integrated workspace for users upgrading an existing QComfy profile.
+            shown.append("H3 Studio")
         
         shown = [t.name for t in self.tabs if t.name in shown and t.name != "Settings"]
         self._config._values.set("tabs", shown)

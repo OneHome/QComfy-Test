@@ -37,6 +37,15 @@ Item {
         }
 
         SColumnButton {
+            property var name: "Enhancer"
+            label: root.tr(name)
+            active: SETTINGS.currentTab == name
+            onPressed: {
+                SETTINGS.currentTab = name
+            }
+        }
+
+        SColumnButton {
             property var name: "Remote"
             label: root.tr(name)
             active: SETTINGS.currentTab == name
@@ -79,10 +88,11 @@ Item {
         StackLayout {
             id: settingsStack
             anchors.fill: parent
-            currentIndex: ["Program", "Remote"].indexOf(SETTINGS.currentTab)
+            currentIndex: ["Program", "Remote", "Enhancer"].indexOf(SETTINGS.currentTab)
             
             ProgramSettings { }
             RemoteSettings { }
+            EnhancerSettings { }
         }
     }
 }

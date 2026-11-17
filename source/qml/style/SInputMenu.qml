@@ -8,6 +8,7 @@ import gui 1.0
 MouseArea {
     id: root
     property var target: null
+    property string enhanceKey: ""      // set on prompt boxes: adds Enhance / Undo enhance to the menu
     property int selStart: 0
     property int selEnd: 0
     acceptedButtons: Qt.RightButton
@@ -33,7 +34,7 @@ MouseArea {
 
     SContextMenu {
         id: menu
-        width: 80
+        width: root.enhanceKey != "" ? 160 : 80
         SContextMenuItem {
             text: "Cut"
             onPressed: {
@@ -51,6 +52,22 @@ MouseArea {
         SContextMenuItem {
             text: "Paste"
             onPressed: root.target.paste()
+        }
+        SContextMenuItem {
+            text: "Select all"
+            onPressed: root.target.selectAll()
+        }
+        SContextMenuItem {
+            visible: root.enhanceKey != ""
+            text: "Enhance"
+            shortcut: "Ctrl+E"
+            onPressed: VIDEO.enhance(root.enhanceKey)
+        }
+        SContextMenuItem {
+            visible: root.enhanceKey != "" && VIDEO.undoFields.indexOf(root.enhanceKey) >= 0
+            text: "Undo enhance"
+            shortcut: "Ctrl+Shift+E"
+            onPressed: VIDEO.undoEnhance(root.enhanceKey)
         }
     }
 }
